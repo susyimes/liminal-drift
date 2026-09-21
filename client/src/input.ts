@@ -1,3 +1,84 @@
+/** Physical keys used for walk / sneak / actions. Layout-independent. */
+const CODE_ALIASES: Record<string, string[]> = {
+  KeyW: ["w"],
+  KeyA: ["a"],
+  KeyS: ["s"],
+  KeyD: ["d"],
+  ArrowUp: ["arrowup"],
+  ArrowDown: ["arrowdown"],
+  ArrowLeft: ["arrowleft"],
+  ArrowRight: ["arrowright"],
+  ShiftLeft: ["shift"],
+  ShiftRight: ["shift"],
+  KeyF: ["f"],
+  KeyE: ["e"],
+  KeyM: ["m"],
+  Space: [" "],
+};
+
+const PREVENT_DEFAULT = new Set([
+  "ArrowUp",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "Space",
+  "KeyW",
+  "KeyA",
+  "KeyS",
+  "KeyD",
+  " ",
+  "arrowup",
+  "arrowdown",
+  "arrowleft",
+  "arrowright",
+]);
+
+export type Keyish = Pick<KeyboardEvent, "key" | "code">;
+
+/** Tokens stored for one key event — `event.code` plus `event.key` aliases. */
+export function tokensForKeyEvent(event: Keyish): string[] {
+  const tokens = new Set<string>();
+  if (event.code) {
+    tokens.add(event.code);
+    for (const alias of CODE_ALIASES[event.code] ?? []) tokens.add(alias);
+  }
+  if (event.key) {
+    tokens.add(event.key);
+    tokens.add(event.key.toLowerCase());
+  }
+  return [...tokens];
+}
+
+export function inputHeld(keys: Iterable<string>, ...tokens: string[]): boolean {
+  const set = keys instanceof Set ? keys : new Set(keys);
+  return tokens.some((token) => set.has(token));
+}
+
+/**
+ * Only a real tab hide should drop held keys. Window `blur` and pointer-lock
+ * churn fire in automated browsers and must not wipe WASD.
+ */
+export function shouldClearHeldKeys(visibilityState: string): boolean {
+  return visibilityState === "hidden";
+}
+
+/** Stick + keyboard walk vector. +z is camera-forward intent before yaw. */
+export function walkIntent(keys: Iterable<string>, stickX = 0, stickY = 0): { x: number; z: number } {
+  const set = keys instanceof Set ? keys : new Set(keys);
+  let ix = stickX;
+  let iz = -stickY;
+  if (inputHeld(set, "w", "KeyW", "arrowup", "ArrowUp")) iz += 1;
+  if (inputHeld(set, "s", "KeyS", "arrowdown", "ArrowDown")) iz -= 1;
+  if (inputHeld(set, "a", "KeyA", "arrowleft", "ArrowLeft")) ix -= 1;
+  if (inputHeld(set, "d", "KeyD", "arrowright", "ArrowRight")) ix += 1;
+  const mag = Math.hypot(ix, iz);
+  if (mag > 1) {
+    ix /= mag;
+    iz /= mag;
+  }
+  return { x: ix || 0, z: iz || 0 };
+}
+
 export class Input {
   readonly keys = new Set<string>();
   lookX = 0;
@@ -14,10 +95,10 @@ export class Input {
   private stickTouch: number | null = null;
 
   attach(): void {
-    window.addEventListener("keydown", this.onKeyDown);
-    window.addEventListener("keyup", this.onKeyUp);
+    window.addEventListener("keydown", this.onKeyDown, true);
+    window.addEventListener("keyup", this.onKeyUp, true);
     window.addEventListener("mousemove", this.onMouse);
-    window.addEventListener("blur", this.clear);
+    document.addEventListener("visibilitychange", this.onVisibility);
     const stick = document.getElementById("stick");
     const look = document.getElementById("look-pad");
     stick?.addEventListener("touchstart", this.onStickStart, { passive: false });
@@ -35,6 +116,10 @@ export class Input {
     document.getElementById("btn-sneak")?.addEventListener("click", () => {
       this.sneakTap = !this.sneakTap;
     });
+  }
+
+  held(...tokens: string[]): boolean {
+    return inputHeld(this.keys, ...tokens);
   }
 
   consumeFlashlight(): boolean {
@@ -56,7 +141,7 @@ export class Input {
   }
 
   get sneaking(): boolean {
-    return this.sneakHeld || this.sneakTap || this.keys.has("shift");
+    return this.sneakHeld || this.sneakTap || this.held("shift", "Shift", "ShiftLeft", "ShiftRight");
   }
 
   consumeLook(): { x: number; y: number } {
@@ -67,19 +152,26 @@ export class Input {
   }
 
   private onKeyDown = (event: KeyboardEvent): void => {
-    this.keys.add(event.key.toLowerCase());
-    if (event.key === "Shift") this.sneakHeld = true;
-    if (event.key.toLowerCase() === "f") this.flashlightQueued = true;
-    if (event.key.toLowerCase() === "e") this.interactQueued = true;
-    if (event.key.toLowerCase() === "m") this.muteQueued = true;
-    if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(event.key.toLowerCase())) {
+    const tokens = tokensForKeyEvent(event);
+    for (const token of tokens) this.keys.add(token);
+    if (event.key === "Shift" || event.code === "ShiftLeft" || event.code === "ShiftRight") {
+      this.sneakHeld = true;
+    }
+    if (!event.repeat) {
+      if (inputHeld(tokens, "f", "KeyF")) this.flashlightQueued = true;
+      if (inputHeld(tokens, "e", "KeyE")) this.interactQueued = true;
+      if (inputHeld(tokens, "m", "KeyM")) this.muteQueued = true;
+    }
+    if (PREVENT_DEFAULT.has(event.code) || PREVENT_DEFAULT.has(event.key) || PREVENT_DEFAULT.has(event.key.toLowerCase())) {
       event.preventDefault();
     }
   };
 
   private onKeyUp = (event: KeyboardEvent): void => {
-    this.keys.delete(event.key.toLowerCase());
-    if (event.key === "Shift") this.sneakHeld = false;
+    for (const token of tokensForKeyEvent(event)) this.keys.delete(token);
+    if (event.key === "Shift" || event.code === "ShiftLeft" || event.code === "ShiftRight") {
+      this.sneakHeld = false;
+    }
   };
 
   private onMouse = (event: MouseEvent): void => {
@@ -89,7 +181,11 @@ export class Input {
     }
   };
 
-  private clear = (): void => {
+  private onVisibility = (): void => {
+    if (shouldClearHeldKeys(document.visibilityState)) this.releaseHeld();
+  };
+
+  private releaseHeld = (): void => {
     this.keys.clear();
     this.sneakHeld = false;
   };

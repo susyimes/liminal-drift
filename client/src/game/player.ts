@@ -1,8 +1,8 @@
 import * as THREE from "three";
-import { clamp, circleHitsAabb, pointInAabb } from "./math.ts";
+import { clamp, circleHitsAabb, firstFreePoint, pointInAabb } from "./math.ts";
 import { tex } from "./textures.ts";
+import { walkIntent, type Input } from "../input.ts";
 import type { World } from "./world.ts";
-import type { Input } from "../input.ts";
 
 export class Player {
   x = 0;
@@ -68,17 +68,20 @@ export class Player {
     return Boolean(world.current.alcove && pointInAabb(this.x, this.z, world.current.alcove));
   }
 
+  placeFree(world: World, x: number, z: number): void {
+    const spot = firstFreePoint((px, pz) => this.blocked(world, px, pz), x, z);
+    this.x = spot.x;
+    this.z = spot.z;
+  }
+
   update(dt: number, input: Input, world: World): void {
     const look = input.consumeLook();
     this.applyLook(look.x, look.y);
     this.sneak = input.sneaking;
 
-    let ix = input.stickX;
-    let iz = -input.stickY;
-    if (input.keys.has("w") || input.keys.has("arrowup")) iz += 1;
-    if (input.keys.has("s") || input.keys.has("arrowdown")) iz -= 1;
-    if (input.keys.has("a") || input.keys.has("arrowleft")) ix -= 1;
-    if (input.keys.has("d") || input.keys.has("arrowright")) ix += 1;
+    const wish = walkIntent(input.keys, input.stickX, input.stickY);
+    let ix = wish.x;
+    let iz = wish.z;
     const mag = Math.hypot(ix, iz);
     if (mag > 1) {
       ix /= mag;
