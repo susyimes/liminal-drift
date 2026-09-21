@@ -87,3 +87,23 @@ export function dist2(ax: number, az: number, bx: number, bz: number): number {
   const dz = az - bz;
   return dx * dx + dz * dz;
 }
+
+/** Preferred spawn, then a short spiral so the player is never born inside a collider. */
+export function firstFreePoint(
+  blocked: (x: number, z: number) => boolean,
+  preferredX: number,
+  preferredZ: number,
+): { x: number; z: number } {
+  if (!blocked(preferredX, preferredZ)) return { x: preferredX, z: preferredZ };
+  const rings = [0.7, 1.3, 2.0, 2.8];
+  const steps = 8;
+  for (const radius of rings) {
+    for (let i = 0; i < steps; i += 1) {
+      const angle = (i / steps) * Math.PI * 2;
+      const x = preferredX + Math.cos(angle) * radius;
+      const z = preferredZ + Math.sin(angle) * radius;
+      if (!blocked(x, z)) return { x, z };
+    }
+  }
+  return { x: preferredX, z: preferredZ };
+}

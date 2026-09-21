@@ -35,11 +35,13 @@ The browser never sees `TYPESAFE_API_KEY`. Vite proxies `/api/*` to the Node ser
 | Input | Action |
 | --- | --- |
 | W A S D / left stick | Walk (subtle head-bob; reduced while sneaking) |
-| Mouse / right-side drag | Look (click to lock pointer) |
+| Mouse / right-side drag | Look (click to lock pointer — optional; walk works unlocked) |
 | Shift / Sneak | Quiet, slower |
 | F / LAMP | Flashlight (drain scales with Jev `fear_intensity`) |
 | E / USE | Pick up battery, keycard, or note (sound + toast) |
 | M | Mute (persisted in `localStorage`) |
+
+Automated / pointer-lock playtests should send `keydown`/`keyup` with physical **`code`** values (`KeyW`, `KeyA`, `KeyS`, `KeyD`, `ArrowUp`, `ArrowDown`, `ArrowLeft`, `ArrowRight`). `event.key` still works, but layout/IME can rewrite it. Pointer lock is mouse-look only — movement must not depend on it. Do not treat window `blur` as “release all keys”; only a hidden tab clears held input.
 
 **Win:** open a rare exit foyer door (keycard, or depth ≥ 12) **or** survive to **depth 14**.  
 **Lose:** the entity reaches you. Game Over lists what Jev (or fallback) chose for each room.

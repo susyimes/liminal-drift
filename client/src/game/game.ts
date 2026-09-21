@@ -168,9 +168,8 @@ export class Game {
     this.hazeNear = this.makeHaze(0xc4a24a, 0.045, -9, 28, 10);
     this.hazeFar = this.makeHaze(0x3d4a58, 0.07, -18, 40, 14);
     this.camera.add(this.hazeNear, this.hazeFar);
-    this.player.x = 0;
-    this.player.z = 1.2;
     this.player.yaw = 0;
+    this.player.placeFree(this.world, 0, 1.2);
     this.mode = "playing";
     this.status = "Yellow forever. The tubes remember a building.";
     this.waitingDoor = false;

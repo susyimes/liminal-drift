@@ -14,7 +14,12 @@ ui.syncMute(game.audio.isMuted);
 void fetchHealth().then((info) => ui.health(info));
 
 game.renderer.domElement.addEventListener("click", () => {
-  if (game.mode === "playing") void game.renderer.domElement.requestPointerLock();
+  if (game.mode !== "playing") return;
+  try {
+    void game.renderer.domElement.requestPointerLock();
+  } catch {
+    // Pointer lock is optional mouse-look only. WASD must work without it.
+  }
 });
 
 async function begin(): Promise<void> {
