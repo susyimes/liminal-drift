@@ -59,6 +59,7 @@ export class Game {
   private fearFromJev = 0.4;
   private lastPickupCheck = 0;
   private enterBeat = 0;
+  private lastEnteredRoomId: string | null = null;
   private toastAge = 0;
   private hurtFlash = 0;
   private hemi: THREE.HemisphereLight;
@@ -175,6 +176,7 @@ export class Game {
     this.waitingDoor = false;
     this.fearFromJev = 0.45;
     this.enterBeat = 0.7;
+    this.lastEnteredRoomId = this.world.currentId;
     this.toast = null;
     this.clock = new THREE.Clock();
   }
@@ -234,19 +236,20 @@ export class Game {
         this.player.z = portal.room.cz;
       }
       this.world.currentId = portal.room.id;
-      this.entity.grace = 1.8;
-      this.onEnter(portal.room);
+      this.markEntered(portal.room);
     } else if (portal.kind === "exit") {
       this.tryExit();
     } else if (portal.kind === "locked") {
       this.status = this.player.hasKeycard ? "The lock hesitates." : "The lock wants a card.";
     } else if (portal.kind === "fake") {
       this.status = "The hallway is wallpaper. Someone wanted you to believe in a door.";
+    } else if (contained && this.lastEnteredRoomId !== contained.id) {
+      this.markEntered(contained);
     }
 
     this.collect(dt);
     this.tickFear(dt);
-    this.world.updateLights(performance.now() / 1000, this.player.fear, dt);
+    this.world.updateLights(performance.now() / 1000, this.player.fear, dt, this.player.x, this.player.z);
 
     const caught = this.entity.update(dt, this.player, this.world, this.compactState(), {
       onStinger: () => {
@@ -324,7 +327,10 @@ export class Game {
     this.renderer.toneMappingExposure = 0.8 - this.player.fear * 0.002 - this.hurtFlash * 0.12 + this.enterBeat * 0.12;
 
     document.getElementById("vignette")?.style.setProperty("opacity", String(0.5 + this.player.fear / 180 + prox * 0.25));
-    document.getElementById("static-overlay")?.style.setProperty("opacity", this.waitingDoor ? "0.42" : this.enterBeat > 0 ? String(this.enterBeat * 0.35) : "0");
+    document.getElementById("static-overlay")?.style.setProperty(
+      "opacity",
+      this.waitingDoor ? "0.14" : this.enterBeat > 0 ? String(this.enterBeat * 0.1) : "0",
+    );
     document.getElementById("hurt")?.style.setProperty("opacity", this.hurtFlash > 0 ? String(this.hurtFlash * 0.55) : prox > 0.65 ? String((prox - 0.65) * 1.4) : "0");
     document.getElementById("grade")?.style.setProperty("opacity", String(0.18 + this.player.fear / 280 + this.hurtFlash * 0.35));
     document.getElementById("grade")?.classList.toggle("hurt-grade", this.hurtFlash > 0.2);
@@ -339,6 +345,13 @@ export class Game {
     const sz = inward ? -out.z : out.z;
     this.player.x += sx * 0.85;
     this.player.z += sz * 0.85;
+  }
+
+  private markEntered(room: BuiltRoom): void {
+    if (this.lastEnteredRoomId === room.id) return;
+    this.lastEnteredRoomId = room.id;
+    this.entity.grace = 1.8;
+    this.onEnter(room);
   }
 
   private onEnter(room: BuiltRoom): void {
