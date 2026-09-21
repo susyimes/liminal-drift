@@ -19,6 +19,7 @@ import {
   type Aabb,
   type Wall,
 } from "./math.ts";
+import { initialDoorGeneration } from "./doors.ts";
 import { makeGraffitiTexture, tex, tiled } from "./textures.ts";
 
 export type PickupKind = "battery" | "keycard" | "note";
@@ -644,7 +645,7 @@ export function buildRoom(options: {
         fake,
         locked: lockThis,
         connectedRoomId: null,
-        generation: isEntry ? "ready" : "idle",
+        generation: initialDoorGeneration(isEntry, id),
         pendingSince: 0,
         decision: null,
         shimmer: visuals.shimmer,

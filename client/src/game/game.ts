@@ -12,8 +12,8 @@ import { Entity } from "./entity.ts";
 import { pointInAabb } from "./math.ts";
 import { DriftParticles } from "./particles.ts";
 import { Player } from "./player.ts";
-import type { BuiltRoom } from "./rooms.ts";
-import { doorOutward } from "./rooms.ts";
+import type { BuiltRoom, Door } from "./rooms.ts";
+import { doorOutward, doorWorldPos } from "./rooms.ts";
 import { World } from "./world.ts";
 
 export type GameMode = "title" | "playing" | "over";
@@ -103,6 +103,59 @@ export class Game {
     window.addEventListener("resize", this.onResize);
     this.running = true;
     this.loop();
+  }
+
+  async stepUnexploredDoor(): Promise<{
+    kind: string;
+    depth: number;
+    roomId: string;
+    archetype: string;
+    source: GenerationSource;
+    warning: string | null;
+  }> {
+    const found = this.world.findUnexploredDoor();
+    if (!found) {
+      return {
+        kind: "none",
+        depth: this.world.roomsVisited,
+        roomId: this.world.currentId,
+        archetype: this.world.current.archetype,
+        source: this.world.lastSource,
+        warning: "no_open_door",
+      };
+    }
+    const { room, door } = found;
+    this.world.currentId = room.id;
+    this.placeAtDoor(room, door, -0.32);
+    const compact = this.compactState();
+    await this.world.considerPrefetch(this.player.x, this.player.z, compact);
+    const deadline = performance.now() + 1600;
+    while (!door.decision && !door.connectedRoomId && performance.now() < deadline) {
+      await new Promise((resolve) => window.setTimeout(resolve, 25));
+    }
+    this.placeAtDoor(room, door, 0.12);
+    const portal = this.world.tryEnter(this.player.x, this.player.z, this.compactState());
+    if (portal.kind === "entered") {
+      this.nudgeThroughDoor();
+      const dest = this.world.current;
+      this.player.x = dest.cx;
+      this.player.z = dest.cz;
+    }
+    return {
+      kind: portal.kind,
+      depth: this.world.roomsVisited,
+      roomId: this.world.currentId,
+      archetype: this.world.current.archetype,
+      source: this.world.lastSource,
+      warning: this.world.lastWarning,
+    };
+  }
+
+  private placeAtDoor(room: BuiltRoom, door: Door, outward: number): void {
+    const pos = doorWorldPos(room, door);
+    const out = doorOutward(room, door);
+    this.player.x = pos.x + out.x * outward;
+    this.player.z = pos.z + out.z * outward;
   }
 
   startRun(): void {

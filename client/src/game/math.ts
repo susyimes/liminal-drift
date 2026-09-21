@@ -36,9 +36,11 @@ export function yawFromTurns(turns: number): number {
 }
 
 export function rotateY(x: number, z: number, yaw: number): { x: number; z: number } {
+  // Match THREE.Object3D rotation.y (right-hand, CCW when looking down +Y):
+  // x' = x cos θ + z sin θ,  z' = -x sin θ + z cos θ
   const c = Math.cos(yaw);
   const s = Math.sin(yaw);
-  return { x: x * c - z * s, z: x * s + z * c };
+  return { x: x * c + z * s, z: -x * s + z * c };
 }
 
 export function aabb(minX: number, maxX: number, minY: number, maxY: number, minZ: number, maxZ: number): Aabb {
