@@ -24,6 +24,7 @@ export class Ui {
       const muted = game.audio.toggleMute();
       this.syncMute(muted);
     });
+    this.syncMute(game.audio.isMuted);
   }
 
   showTitle(): void {
@@ -50,15 +51,15 @@ export class Ui {
     this.over.classList.remove("hidden");
     document.body.classList.remove("playing");
     el<HTMLElement>("over-kicker").textContent =
-      kind === "dead" ? "DRIFT ENDED" : kind === "exit" ? "THRESHOLD" : "DEPTH MARK";
+      kind === "dead" ? "THE DRIFT CLOSES" : kind === "exit" ? "A THRESHOLD" : "DEPTH MARK";
     el<HTMLElement>("over-title").textContent =
       kind === "dead" ? "It found you" : kind === "exit" ? "A door opened" : "You outlasted the halls";
     el<HTMLElement>("over-lead").textContent = lead;
     const lines = log.map((entry) => {
       const d = entry.decision;
-      return `#${entry.depth} ${entry.source}  ${d.roomArchetype} · ${d.size} · ${d.lighting} · ${d.ambience} · ${d.entityBehavior} · loot ${d.loot} · fear ${d.fearIntensity.toFixed(1)}  (${entry.latencyMs}ms)`;
+      return `#${entry.depth} ${entry.source}  ${d.roomArchetype} · ${d.layoutMotif} · ${d.lighting} · ${d.ambience} · ${d.encounterCard} · ${d.entityBehavior} · clue ${d.clueBeat} · exitΔ ${d.advancesExit ? "yes" : "no"}  (${entry.latencyMs}ms)`;
     });
-    lines.push("", `Generation: ${jev} jev / ${fallback} fallback`, "This is what Jev (or the fallback) chose.");
+    lines.push("", `Generation: ${jev} jev / ${fallback} fallback`, "What Jev (or the fallback director) chose.");
     el<HTMLElement>("over-log").textContent = lines.join("\n");
   }
 
@@ -74,8 +75,8 @@ export class Ui {
   }
 
   paint(snap: HudSnapshot): void {
-    el<HTMLElement>("fear-bar").style.width = `${snap.fear}%`;
-    el<HTMLElement>("fear-val").textContent = `${Math.round(snap.fear)}`;
+    el<HTMLElement>("sanity-bar").style.width = `${snap.sanity}%`;
+    el<HTMLElement>("sanity-val").textContent = `${Math.round(snap.sanity)}`;
     el<HTMLElement>("bat-bar").style.width = `${snap.battery}%`;
     el<HTMLElement>("bat-val").textContent = `${Math.round(snap.battery)}`;
     el<HTMLElement>("depth-pill").textContent = `DEPTH ${snap.depth}`;
@@ -85,13 +86,20 @@ export class Ui {
     el<HTMLElement>("source-pill").textContent = snap.source.toUpperCase();
     el<HTMLElement>("status-line").textContent = snap.status;
     el<HTMLElement>("jev-line").textContent =
-      `Jev ${snap.source} · ${Math.round(snap.latencyMs)}ms · ${snap.callCount} calls · ${snap.jevCalls} jev / ${snap.fallbackCalls} fallback`;
+      `Jev ${snap.source} · ${Math.round(snap.latencyMs)}ms · ${snap.jevCalls}/${snap.fallbackCalls} · ${snap.ambience} · exit ${Math.round(snap.exitChance * 100)}%`;
     const warn = el<HTMLElement>("warn-line");
     if (snap.warning) {
       warn.textContent = snap.warning;
       warn.classList.remove("hidden");
     } else {
       warn.classList.add("hidden");
+    }
+    const toast = el<HTMLElement>("pickup-toast");
+    if (snap.toast) {
+      toast.textContent = snap.toast;
+      toast.classList.remove("hidden");
+    } else {
+      toast.classList.add("hidden");
     }
   }
 

@@ -10,6 +10,7 @@ const ui = new Ui();
 (window as Window & { __liminal?: Game }).__liminal = game;
 
 ui.showTitle();
+ui.syncMute(game.audio.isMuted);
 void fetchHealth().then((info) => ui.health(info));
 
 game.renderer.domElement.addEventListener("click", () => {

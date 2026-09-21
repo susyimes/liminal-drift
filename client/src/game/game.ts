@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import {
   WIN_DEPTH,
+  defaultProgress,
   type CompactGameState,
   type CompactRoomMemory,
   type GenerationSource,
@@ -19,6 +20,7 @@ export type OverKind = "dead" | "exit" | "depth";
 
 export type HudSnapshot = {
   fear: number;
+  sanity: number;
   battery: number;
   depth: number;
   hasKeycard: boolean;
@@ -30,12 +32,17 @@ export type HudSnapshot = {
   warning: string | null;
   status: string;
   flashlightOn: boolean;
+  toast: string | null;
+  encounter: string;
+  ambience: string;
+  exitChance: number;
 };
 
 export class Game {
   mode: GameMode = "title";
   overKind: OverKind = "dead";
   overStatus = "";
+  toast: string | null = null;
   readonly renderer: THREE.WebGLRenderer;
   readonly scene: THREE.Scene;
   readonly camera: THREE.PerspectiveCamera;
@@ -50,6 +57,11 @@ export class Game {
   private running = false;
   private fearFromJev = 0.4;
   private lastPickupCheck = 0;
+  private enterBeat = 0;
+  private toastAge = 0;
+  private hurtFlash = 0;
+  private hemi: THREE.HemisphereLight;
+  private ambient: THREE.AmbientLight;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({
@@ -62,16 +74,18 @@ export class Game {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.72;
+    this.renderer.toneMappingExposure = 0.82;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x1a160c);
-    this.scene.fog = new THREE.FogExp2(0x1c1810, 0.085);
+    this.scene.background = new THREE.Color(0x2a220e);
+    this.scene.fog = new THREE.FogExp2(0x8a7430, 0.055);
 
     this.camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.08, 80);
     this.scene.add(this.camera);
-    this.scene.add(new THREE.AmbientLight(0x4a4020, 0.32));
-    this.scene.add(new THREE.HemisphereLight(0xe8d44d, 0x2a2110, 0.28));
+    this.ambient = new THREE.AmbientLight(0x3a3214, 0.11);
+    this.hemi = new THREE.HemisphereLight(0xf0e08a, 0x1a1408, 0.16);
+    this.scene.add(this.ambient);
+    this.scene.add(this.hemi);
 
     this.world = new World(this.scene);
     this.player = new Player(this.camera);
@@ -93,15 +107,18 @@ export class Game {
     this.player.z = 1.2;
     this.player.yaw = 0;
     this.mode = "playing";
-    this.status = "Yellow forever. Walk toward a dark doorway.";
+    this.status = "Yellow forever. The tubes remember a building.";
     this.waitingDoor = false;
-    this.fearFromJev = 0.4;
+    this.fearFromJev = 0.45;
+    this.enterBeat = 0.7;
+    this.toast = null;
     this.clock = new THREE.Clock();
   }
 
   hud(): HudSnapshot {
     return {
       fear: this.player.fear,
+      sanity: Math.max(0, 100 - this.player.fear),
       battery: this.player.battery,
       depth: this.world.roomsVisited,
       hasKeycard: this.player.hasKeycard,
@@ -113,6 +130,10 @@ export class Game {
       warning: this.world.lastWarning,
       status: this.status,
       flashlightOn: this.player.flashlightOn,
+      toast: this.toast,
+      encounter: this.world.current.decision.encounterCard,
+      ambience: this.world.current.decision.ambience,
+      exitChance: this.world.exitChance,
     };
   }
 
@@ -135,6 +156,7 @@ export class Game {
     void this.world.considerPrefetch(this.player.x, this.player.z, compact);
     const portal = this.world.tryEnter(this.player.x, this.player.z, compact);
     this.waitingDoor = portal.kind === "waiting";
+    this.audio.setPortal(this.waitingDoor);
     if (portal.kind === "waiting") {
       this.status = "The doorway is still deciding what it is.";
     } else if (portal.kind === "entered" && portal.room) {
@@ -144,16 +166,24 @@ export class Game {
     } else if (portal.kind === "exit") {
       this.tryExit();
     } else if (portal.kind === "locked") {
-      this.status = "The lock wants a card.";
+      this.status = this.player.hasKeycard ? "The lock hesitates." : "The lock wants a card.";
+    } else if (portal.kind === "fake") {
+      this.status = "The hallway is wallpaper. Someone wanted you to believe in a door.";
     }
 
     this.collect(dt);
     this.tickFear(dt);
-    this.world.updateLights(performance.now() / 1000, this.player.fear);
+    this.world.updateLights(performance.now() / 1000, this.player.fear, dt);
 
-    const caught = this.entity.update(dt, this.player, this.world, this.compactState(), () => {
-      this.audio.stinger();
-      this.status = "It is in the room with you.";
+    const caught = this.entity.update(dt, this.player, this.world, this.compactState(), {
+      onStinger: () => {
+        this.audio.stinger();
+        this.player.punch = Math.max(this.player.punch, 0.085);
+        this.hurtFlash = 1;
+        this.status = "It is in the room with you.";
+      },
+      onBait: () => this.audio.bait(),
+      onStep: (muffled) => this.audio.entityStep(muffled),
     });
     if (caught === "caught") {
       this.end("dead", "It closed the last few steps without a sound.");
@@ -166,19 +196,46 @@ export class Game {
     }
 
     const prox = this.entity.active ? Math.max(0, 1 - this.entity.distanceTo(this.player) / 10) : 0;
+    if (prox > 0.68 && this.entity.los(this.world)) {
+      this.player.punch = Math.max(this.player.punch, (prox - 0.68) * 0.12);
+      this.hurtFlash = Math.max(this.hurtFlash, (prox - 0.68) * 1.6);
+    }
     this.audio.setAmbience(this.world.current.decision.ambience);
     this.audio.setProximity(prox);
-    this.audio.update(dt, this.player.moving, this.player.sneak, this.player.fear);
+    this.audio.update(dt, this.player.moving, this.player.sneak, this.player.fear, this.world.current.surface);
 
-    const fog = this.scene.fog;
-    if (fog instanceof THREE.FogExp2) {
-      fog.density = 0.07 + this.player.fear * 0.00045 + (this.world.current.decision.lighting === "dead" ? 0.03 : 0);
+    this.enterBeat = Math.max(0, this.enterBeat - dt * 1.15);
+    this.hurtFlash = Math.max(0, this.hurtFlash - dt * 1.4);
+    if (this.toast) {
+      this.toastAge -= dt;
+      if (this.toastAge <= 0) this.toast = null;
     }
-    this.renderer.toneMappingExposure = 0.78 - this.player.fear * 0.0025;
 
-    document.getElementById("vignette")?.style.setProperty("opacity", String(0.45 + this.player.fear / 160));
-    document.getElementById("static-overlay")?.style.setProperty("opacity", this.waitingDoor ? "0.35" : "0");
-    document.getElementById("hurt")?.style.setProperty("opacity", prox > 0.65 ? String((prox - 0.65) * 1.4) : "0");
+    this.applyAtmosphere(prox);
+  }
+
+  private applyAtmosphere(prox: number): void {
+    const lighting = this.world.current.decision.lighting;
+    const fog = this.scene.fog;
+    const density =
+      (lighting === "dead" ? 0.1 : lighting === "dim" ? 0.078 : lighting === "flickering" ? 0.06 : 0.048) +
+      this.player.fear * 0.00028 +
+      this.enterBeat * 0.03;
+    const fogColor = lighting === "dead" ? 0x1a160c : lighting === "dim" ? 0x4a3c18 : 0x8f7a32;
+    this.scene.background = new THREE.Color(lighting === "dead" ? 0x0c0a06 : 0x2a220e);
+    if (fog instanceof THREE.FogExp2) {
+      fog.density = density;
+      fog.color.setHex(fogColor);
+    }
+    this.ambient.intensity = lighting === "harsh" ? 0.14 : lighting === "dead" ? 0.04 : 0.1;
+    this.hemi.intensity = lighting === "harsh" ? 0.2 : 0.14;
+    this.renderer.toneMappingExposure = 0.8 - this.player.fear * 0.002 - this.hurtFlash * 0.12 + this.enterBeat * 0.12;
+
+    document.getElementById("vignette")?.style.setProperty("opacity", String(0.5 + this.player.fear / 180 + prox * 0.25));
+    document.getElementById("static-overlay")?.style.setProperty("opacity", this.waitingDoor ? "0.42" : this.enterBeat > 0 ? String(this.enterBeat * 0.35) : "0");
+    document.getElementById("hurt")?.style.setProperty("opacity", this.hurtFlash > 0 ? String(this.hurtFlash * 0.55) : prox > 0.65 ? String((prox - 0.65) * 1.4) : "0");
+    document.getElementById("grade")?.style.setProperty("opacity", String(0.18 + this.player.fear / 280 + this.hurtFlash * 0.35));
+    document.getElementById("grade")?.classList.toggle("hurt-grade", this.hurtFlash > 0.2);
   }
 
   private nudgeThroughDoor(): void {
@@ -195,14 +252,23 @@ export class Game {
   private onEnter(room: BuiltRoom): void {
     this.fearFromJev = room.decision.fearIntensity;
     this.entity.onNewRoom(room, this.player);
-    const bits = [
-      room.archetype.replaceAll("_", " "),
-      room.decision.lighting,
-      room.decision.ambience,
-    ];
-    if (room.decision.entityPresent) bits.push(room.decision.entityBehavior);
-    this.status = `Jev built ${bits.join(" · ")}.`;
+    this.enterBeat = 1;
+    this.audio.portalResolve();
+    if (room.decision.soundBait) this.audio.bait();
+    const bits = [room.archetype.replaceAll("_", " "), room.decision.lighting, room.decision.ambience];
+    if (room.decision.entityPresent) bits.push(room.decision.entityBehavior.replaceAll("_", " "));
+    this.status = `The room settles: ${bits.join(" · ")}.`;
     if (room.decision.hazard !== "none") this.status += ` Hazard: ${room.decision.hazard.replaceAll("_", " ")}.`;
+    if (room.decision.deadEndBait) this.status += " Some throats are only paint.";
+    if (room.decision.advancesExit) {
+      this.status += " The air is slightly less yellow.";
+    }
+    if (room.decision.encounterCard === "power_flicker_event") this.status += " The tubes fail, then argue.";
+    if (room.decision.encounterCard === "flooded_slow_zone") this.status += " The carpet is a shallow sea.";
+    if (room.decision.encounterCard === "safe_alcove") this.status += " A recess that does not want it.";
+    if (room.decision.encounterCard === "locked_gate_needs_key") this.status += " A gate waits for red plastic.";
+    if (room.decision.clueBeat === "radio_static") this.status += " A radio found a station that is not a station.";
+    if (room.decision.clueBeat === "graffiti") this.status += " Someone wrote on the rule.";
   }
 
   private tryExit(): void {
@@ -223,28 +289,39 @@ export class Game {
     found.pickup.taken = true;
     found.pickup.mesh.visible = false;
     this.audio.pickup();
+    this.player.punch = Math.max(this.player.punch, 0.03);
     if (found.pickup.kind === "battery") {
       this.player.battery = Math.min(100, this.player.battery + 46);
+      this.flashToast("Cells. The lamp has a little more night.");
       this.status = "Spare cells. The lamp has a little more night in it.";
     } else if (found.pickup.kind === "keycard") {
       this.player.hasKeycard = true;
+      this.flashToast("A faded red card.");
       this.status = "A faded red card. Something here still believes in doors.";
     } else if (found.pickup.note) {
       this.player.lastNote = found.pickup.note;
+      this.player.notesFound += 1;
+      this.flashToast(found.pickup.note);
       this.status = found.pickup.note;
     }
   }
 
+  private flashToast(text: string): void {
+    this.toast = text;
+    this.toastAge = 3.4;
+  }
+
   private tickFear(dt: number): void {
     const room = this.world.current;
-    let add = 0.35;
-    if (room.decision.lighting === "dead" || room.decision.lighting === "dim") add += 1.1;
+    let add = 0.32 + this.fearFromJev * 0.22;
+    if (room.decision.lighting === "dead" || room.decision.lighting === "dim") add += 1.05;
     if (room.darkPatch && pointInAabb(this.player.x, this.player.z, room.darkPatch)) add += 2.4;
     if (this.entity.active && this.entity.los(this.world)) add += 2.8;
     else if (this.entity.active && this.entity.hops(this.world) <= 1) add += 1.1;
-    add += Math.min(2.2, this.fearFromJev * 0.35);
     if (this.player.flashlightOn) add -= 0.55;
     if (!this.player.flashlightOn && room.decision.lighting === "dead") add += 0.8;
+    if (room.powerFlicker > 0) add += 1.6;
+    if (this.player.inAlcove(this.world)) add = -3.2;
     this.player.fear = Math.min(100, Math.max(4, this.player.fear + add * dt));
   }
 
@@ -256,6 +333,8 @@ export class Game {
       lighting: room.decision.lighting,
       ambience: room.decision.ambience,
       hazard: room.decision.hazard,
+      encounter: room.decision.encounterCard,
+      motif: room.decision.layoutMotif,
     };
     return {
       purpose: "room",
@@ -279,6 +358,14 @@ export class Game {
         lastIntent: this.entity.lastIntent,
       },
       portal: null,
+      progress: {
+        ...defaultProgress(),
+        exitChance: this.world.exitChance,
+        lastEncounter: this.world.lastEncounter,
+        lastClue: room.decision.clueBeat,
+        notesFound: this.player.notesFound,
+        roomsSinceEntity: this.world.roomsSinceEntity,
+      },
     };
   }
 

@@ -1,5 +1,6 @@
 import * as THREE from "three";
-import { clamp, circleHitsAabb } from "./math.ts";
+import { clamp, circleHitsAabb, pointInAabb } from "./math.ts";
+import { tex } from "./textures.ts";
 import type { World } from "./world.ts";
 import type { Input } from "../input.ts";
 
@@ -14,29 +15,57 @@ export class Player {
   battery = 100;
   hasKeycard = false;
   lastNote: string | null = null;
+  notesFound = 0;
   fear = 10;
   noise = 0.2;
   moving = false;
   sneak = false;
+  speedMul = 1;
+  punch = 0;
+  bob = 0;
   readonly camera: THREE.PerspectiveCamera;
   readonly flashlight: THREE.SpotLight;
+  readonly flashFill: THREE.SpotLight;
   readonly flashTarget: THREE.Object3D;
+  readonly beam: THREE.Mesh;
 
   constructor(camera: THREE.PerspectiveCamera) {
     this.camera = camera;
-    this.flashlight = new THREE.SpotLight(0xfff1c2, 3.4, 16, 0.42, 0.55, 1.35);
+    this.flashlight = new THREE.SpotLight(0xfff1c2, 28, 18, 0.36, 0.48, 1.55);
+    this.flashFill = new THREE.SpotLight(0xffe7a8, 6, 10, 0.72, 0.72, 1.8);
     this.flashTarget = new THREE.Object3D();
     this.flashlight.target = this.flashTarget;
+    this.flashFill.target = this.flashTarget;
     camera.add(this.flashlight);
+    camera.add(this.flashFill);
     camera.add(this.flashTarget);
-    this.flashTarget.position.set(0, 0, -6);
-    this.flashlight.position.set(0.12, -0.12, 0.1);
+    this.flashTarget.position.set(0, 0, -8);
+    this.flashlight.position.set(0.14, -0.16, 0.08);
+    this.flashFill.position.set(0.1, -0.12, 0.04);
+
+    const beamMat = new THREE.MeshBasicMaterial({
+      map: tex.cone,
+      color: 0xfff1c2,
+      transparent: true,
+      opacity: 0.11,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+    });
+    this.beam = new THREE.Mesh(new THREE.ConeGeometry(1.55, 9.2, 28, 1, true), beamMat);
+    this.beam.rotation.x = -Math.PI / 2;
+    this.beam.position.set(0.12, -0.14, -4.6);
+    camera.add(this.beam);
   }
 
   applyLook(dx: number, dy: number): void {
     this.yaw -= dx * 0.0022;
     this.pitch -= dy * 0.002;
     this.pitch = clamp(this.pitch, -1.25, 1.25);
+  }
+
+  inAlcove(world: World): boolean {
+    return Boolean(world.current.alcove && pointInAabb(this.x, this.z, world.current.alcove));
   }
 
   update(dt: number, input: Input, world: World): void {
@@ -56,8 +85,9 @@ export class Player {
       iz /= mag;
     }
 
-    const speed = this.sneak ? 1.35 : 3.05;
+    this.speedMul = world.current.water && world.current.decision.encounterCard === "flooded_slow_zone" ? 0.62 : 1;
     const slip = world.current.water && !this.sneak && Math.random() < dt * 0.7 ? 1.8 : 1;
+    const speed = (this.sneak ? 1.35 : 3.05) * this.speedMul;
     const sin = Math.sin(this.yaw);
     const cos = Math.cos(this.yaw);
     const wishX = (ix * cos - iz * sin) * speed * dt * slip;
@@ -76,17 +106,28 @@ export class Player {
 
     if (input.consumeFlashlight() && this.battery > 0) this.flashlightOn = !this.flashlightOn;
     if (this.battery <= 0) this.flashlightOn = false;
-    if (this.flashlightOn) this.battery = Math.max(0, this.battery - dt * 3.6);
+    const drain = 3.2 + world.current.decision.fearIntensity * 1.15;
+    if (this.flashlightOn) this.battery = Math.max(0, this.battery - dt * drain);
 
-    this.camera.position.set(this.x, this.y, this.z);
+    this.bob += dt * (this.moving ? (this.sneak ? 6.2 : 9.4) : 0);
+    const bobAmt = this.moving ? (this.sneak ? 0.012 : 0.034) : 0;
+    const bobY = Math.sin(this.bob) * bobAmt;
+    const bobX = Math.cos(this.bob * 0.5) * bobAmt * 0.35;
+    this.punch = Math.max(0, this.punch - dt * 3.2);
+    const kick = this.punch * Math.sin(performance.now() * 0.04);
+
+    this.camera.position.set(this.x + bobX, this.y + bobY, this.z);
     this.camera.rotation.order = "YXZ";
-    this.camera.rotation.y = this.yaw;
-    this.camera.rotation.x = this.pitch;
-    const fovTarget = 72 - this.fear * 0.22;
-    this.camera.fov = THREE.MathUtils.damp(this.camera.fov, fovTarget, 4, dt);
+    this.camera.rotation.y = this.yaw + kick * 0.35;
+    this.camera.rotation.x = this.pitch + kick * 0.55;
+    const fearFov = 71 + this.fear * 0.05 - (this.flashlightOn ? 0 : 1.5);
+    this.camera.fov = THREE.MathUtils.damp(this.camera.fov, clamp(fearFov, 66, 80), 4, dt);
     this.camera.updateProjectionMatrix();
-    this.flashlight.intensity = this.flashlightOn ? 3.6 - this.fear * 0.012 : 0;
-    this.flashlight.angle = 0.46 - this.fear * 0.0016;
+    this.flashlight.intensity = this.flashlightOn ? 26 - this.fear * 0.06 : 0;
+    this.flashFill.intensity = this.flashlightOn ? 5.2 : 0;
+    this.flashlight.angle = 0.34 + (1 - this.battery / 100) * 0.08;
+    this.beam.visible = this.flashlightOn;
+    (this.beam.material as THREE.MeshBasicMaterial).opacity = this.flashlightOn ? 0.1 + (this.battery / 100) * 0.04 : 0;
   }
 
   forward(): THREE.Vector3 {
