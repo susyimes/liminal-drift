@@ -54,25 +54,26 @@
 
       <div id="hud" class="hidden">
         <div class="hud-top">
-          <div class="meter">
-            <span>SANITY</span>
-            <div class="bar"><i id="sanity-bar"></i></div>
-            <b id="sanity-val">100</b>
-          </div>
-          <div class="meter">
-            <span>LAMP</span>
-            <div class="bar lamp"><i id="bat-bar"></i></div>
-            <b id="bat-val">100</b>
+          <div class="frame meters">
+            <div class="meter">
+              <span>SANITY</span>
+              <div class="bar"><i id="sanity-bar"></i></div>
+              <b id="sanity-val">100</b>
+            </div>
+            <div class="meter">
+              <span>LAMP</span>
+              <div class="bar lamp"><i id="bat-bar"></i></div>
+              <b id="bat-val">100</b>
+            </div>
           </div>
           <div class="pills">
-            <span id="depth-pill">DEPTH 0</span>
-            <span id="key-pill" class="dim">NO CARD</span>
-            <span id="source-pill">FALLBACK</span>
+            <span id="depth-pill" class="frame chip">DEPTH 0</span>
+            <span id="key-pill" class="frame chip dim">NO CARD</span>
           </div>
         </div>
         <p id="status-line">The hum does not come from the ceiling.</p>
         <div class="hud-bottom">
-          <span id="jev-line">Jev —</span>
+          <span id="jev-line" class="quiet">Jev —</span>
           <span id="warn-line" class="warn hidden"></span>
           <button type="button" id="btn-mute" class="ghost mini">Mute</button>
         </div>

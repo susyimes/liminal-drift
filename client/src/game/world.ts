@@ -196,8 +196,10 @@ export class World {
         const buzz = buzzing ? 0.72 + Math.abs(Math.sin(time * 19 + entry.phase)) * 0.28 : 1;
         const blackout = room.powerFlicker > 0 ? (room.powerFlicker > 1.4 ? 0.04 : 0.15 + Math.abs(Math.sin(time * 36)) * 0.55) : 1;
         const fearDim = 1 - fear * 0.0035;
-        const flicker = buzz * drop * blackout * fearDim;
+        const here = room.id === this.currentId;
+        const flicker = buzz * drop * blackout * fearDim * (here ? 1 : 0.42);
         entry.light.intensity = entry.base * flicker;
+        entry.light.color.setHex(here ? 0xfff1b0 : 0x8fa0b4);
         const tube = entry.tube.material;
         if (tube instanceof THREE.MeshStandardMaterial && tube.emissiveIntensity !== undefined) {
           tube.emissiveIntensity = 0.25 + flicker * 1.35;

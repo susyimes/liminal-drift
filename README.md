@@ -48,9 +48,22 @@ The browser never sees `TYPESAFE_API_KEY`. Vite proxies `/api/*` to the Node ser
 
 ## Atmosphere / 氛围
 
-Procedural Level-0 direction: yellowed wallpaper noise, wet-carpet sheen, buzzing fixture flicker, yellow fog that thickens in dead/dim rooms, a flashlight cone with a fake volumetric beam, portal static while Jev decides, and a silhouette that twitches instead of a cheap capsule. HUD is cinematic type (Cormorant / 宋) with readable **SANITY / DEPTH / Jev** status — not a debug overlay.
+Procedural Level-0 only (no asset packs). Checklist from BV1q843z1EgF:
 
-程序化 Level 0：发黄墙纸噪点、湿地毯高光、灯管闪烁、按照明变浓的黄雾、有体积感的手电锥、门洞生成时的静电，以及会抽动的剪影。HUD 用电影感字体，仍能读到神智 / 深度 / Jev。
+1. One yellow grade — no random UI chrome  
+2. Same frame language on title / HUD / toast / game-over  
+3. Warm fluorescents in the current room; cooler, dimmer halls next door  
+4. Linear fog + two haze cards (warm near / cool far)  
+5. SANITY + LAMP primary; Jev line quiet  
+6. UI click ticks; layered hum / drip / air / footsteps  
+7. Title ↔ play ↔ over fades; door shimmer while Jev decides  
+8. Dust in the lamp cone; portal motes only while a door is generating  
+9. Head-bob, hurt punch, sanity grade  
+10. Near-black entity silhouette on quieter walls  
+11. Cormorant / 宋 / Plex Mono only  
+12. One Backrooms art direction  
+
+程序化 Level 0，不做混搭资源。HUD 主读神智 / 手电，Jev 缩在角落。当前房暖黄灯管，邻房偏冷偏暗。
 
 ## What Jev decides / Jev 决定什么
 

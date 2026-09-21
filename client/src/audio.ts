@@ -125,6 +125,22 @@ export class AudioEngine {
     osc.stop(t + 0.82);
   }
 
+  uiClick(): void {
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(740, t);
+    osc.frequency.exponentialRampToValueAtTime(420, t + 0.07);
+    gain.gain.setValueAtTime(0.05, t);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.08);
+    osc.connect(gain);
+    gain.connect(this.master);
+    osc.start();
+    osc.stop(t + 0.09);
+  }
+
   pickup(): void {
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;

@@ -20,7 +20,7 @@ game.renderer.domElement.addEventListener("click", () => {
 async function begin(): Promise<void> {
   void game.audio.unlock();
   game.startRun();
-  ui.showPlay();
+  await ui.showPlay();
   ui.syncMute(game.audio.isMuted);
 }
 
@@ -32,7 +32,7 @@ function frame(): void {
   if (game.mode === "playing") ui.paint(game.hud());
   if (game.mode === "over" && !ui.over.classList.contains("shown")) {
     ui.over.classList.add("shown");
-    ui.showOver(game.overKind, game.overStatus, game.world.log, game.world.jevCalls, game.world.fallbackCalls);
+    void ui.showOver(game.overKind, game.overStatus, game.world.log, game.world.jevCalls, game.world.fallbackCalls);
   }
   if (game.mode === "playing") ui.over.classList.remove("shown");
   requestAnimationFrame(frame);

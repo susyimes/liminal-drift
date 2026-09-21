@@ -10,6 +10,7 @@ import { AudioEngine } from "../audio.ts";
 import { Input } from "../input.ts";
 import { Entity } from "./entity.ts";
 import { pointInAabb } from "./math.ts";
+import { DriftParticles } from "./particles.ts";
 import { Player } from "./player.ts";
 import type { BuiltRoom } from "./rooms.ts";
 import { doorOutward } from "./rooms.ts";
@@ -62,6 +63,9 @@ export class Game {
   private hurtFlash = 0;
   private hemi: THREE.HemisphereLight;
   private ambient: THREE.AmbientLight;
+  private particles: DriftParticles;
+  private hazeNear: THREE.Mesh;
+  private hazeFar: THREE.Mesh;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({
@@ -78,7 +82,7 @@ export class Game {
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x2a220e);
-    this.scene.fog = new THREE.FogExp2(0x8a7430, 0.055);
+    this.scene.fog = new THREE.Fog(0x8a7430, 3.4, 24);
 
     this.camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.08, 80);
     this.scene.add(this.camera);
@@ -91,6 +95,10 @@ export class Game {
     this.player = new Player(this.camera);
     this.entity = new Entity();
     this.entity.attach(this.scene);
+    this.particles = new DriftParticles(this.scene);
+    this.hazeNear = this.makeHaze(0xc4a24a, 0.045, -9, 28, 10);
+    this.hazeFar = this.makeHaze(0x3d4a58, 0.07, -18, 40, 14);
+    this.camera.add(this.hazeNear, this.hazeFar);
     this.input.attach();
     window.addEventListener("resize", this.onResize);
     this.running = true;
@@ -103,6 +111,9 @@ export class Game {
     this.player = new Player(this.camera);
     this.entity = new Entity();
     this.entity.attach(this.scene);
+    this.hazeNear = this.makeHaze(0xc4a24a, 0.045, -9, 28, 10);
+    this.hazeFar = this.makeHaze(0x3d4a58, 0.07, -18, 40, 14);
+    this.camera.add(this.hazeNear, this.hazeFar);
     this.player.x = 0;
     this.player.z = 1.2;
     this.player.yaw = 0;
@@ -211,22 +222,41 @@ export class Game {
       if (this.toastAge <= 0) this.toast = null;
     }
 
+    this.particles.update(dt, this.player, this.world, this.waitingDoor);
     this.applyAtmosphere(prox);
+  }
+
+  private makeHaze(color: number, opacity: number, z: number, w: number, h: number): THREE.Mesh {
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(w, h),
+      new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity,
+        depthWrite: false,
+        fog: false,
+      }),
+    );
+    mesh.position.set(0, 0.1, z);
+    mesh.renderOrder = -2;
+    return mesh;
   }
 
   private applyAtmosphere(prox: number): void {
     const lighting = this.world.current.decision.lighting;
     const fog = this.scene.fog;
-    const density =
-      (lighting === "dead" ? 0.1 : lighting === "dim" ? 0.078 : lighting === "flickering" ? 0.06 : 0.048) +
-      this.player.fear * 0.00028 +
-      this.enterBeat * 0.03;
-    const fogColor = lighting === "dead" ? 0x1a160c : lighting === "dim" ? 0x4a3c18 : 0x8f7a32;
-    this.scene.background = new THREE.Color(lighting === "dead" ? 0x0c0a06 : 0x2a220e);
-    if (fog instanceof THREE.FogExp2) {
-      fog.density = density;
+    const fogColor = lighting === "dead" ? 0x141820 : lighting === "dim" ? 0x3a3420 : 0x8a7430;
+    this.scene.background = new THREE.Color(lighting === "dead" ? 0x0a0c10 : 0x2a220e);
+    if (fog instanceof THREE.Fog) {
+      fog.near = lighting === "dead" ? 1.8 : 3.2;
+      fog.far = (lighting === "dead" ? 14 : lighting === "dim" ? 18 : 23) - this.player.fear * 0.04;
       fog.color.setHex(fogColor);
     }
+    const nearMat = this.hazeNear.material as THREE.MeshBasicMaterial;
+    const farMat = this.hazeFar.material as THREE.MeshBasicMaterial;
+    nearMat.opacity = lighting === "dead" ? 0.02 : 0.045 + this.enterBeat * 0.04;
+    farMat.color.setHex(lighting === "dead" ? 0x1a222c : 0x3d4a58);
+    farMat.opacity = 0.06 + this.player.fear * 0.0004;
     this.ambient.intensity = lighting === "harsh" ? 0.2 : lighting === "dead" ? 0.06 : 0.15;
     this.hemi.intensity = lighting === "harsh" ? 0.26 : 0.2;
     this.renderer.toneMappingExposure = 0.8 - this.player.fear * 0.002 - this.hurtFlash * 0.12 + this.enterBeat * 0.12;

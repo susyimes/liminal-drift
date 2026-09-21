@@ -44,12 +44,11 @@ export class Entity {
 
   constructor() {
     this.group = new THREE.Group();
-    const mat = new THREE.MeshStandardMaterial({
-      color: 0x0b0a08,
-      roughness: 0.94,
-      metalness: 0.02,
+    const mat = new THREE.MeshLambertMaterial({
+      color: 0x050403,
+      emissive: 0x000000,
       transparent: true,
-      opacity: 0.88,
+      opacity: 0.96,
     });
     this.torso = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.95, 0.2), mat);
     this.torso.position.set(0, 1.28, 0);
@@ -198,9 +197,9 @@ export class Entity {
     this.group.scale.set(mimicking ? 0.55 : 1, mimicking ? 1.15 : 1, mimicking ? 0.22 : 1);
 
     const dist = this.distanceTo(player);
-    const opacity = clamp(0.22 + (this.los(world) ? 0.38 : 0) + (lit ? 0.28 : 0) - dist * 0.018, 0.1, 0.96);
+    const opacity = clamp(0.58 + (this.los(world) ? 0.34 : 0) + (lit ? 0.08 : 0) - dist * 0.012, 0.22, 0.98);
     for (const mesh of [this.torso, this.head, this.legL, this.legR, this.armL, this.armR]) {
-      (mesh.material as THREE.MeshStandardMaterial).opacity = opacity;
+      (mesh.material as THREE.MeshLambertMaterial).opacity = opacity;
     }
     this.group.visible = dist < 22;
 
