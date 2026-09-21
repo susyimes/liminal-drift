@@ -7,7 +7,6 @@ export const ROOM_ARCHETYPES = [
   "dead_end",
   "exit_foyer",
 ] as const;
-
 export type RoomArchetype = (typeof ROOM_ARCHETYPES)[number];
 
 export const ROOM_SIZES = ["cramped", "standard", "vast"] as const;
@@ -22,13 +21,43 @@ export type Hazard = (typeof HAZARDS)[number];
 export const LOOT_TYPES = ["none", "battery", "keycard", "note"] as const;
 export type LootType = (typeof LOOT_TYPES)[number];
 
-export const ENTITY_BEHAVIORS = ["stalk", "ambush", "wander", "absent"] as const;
+export const LAYOUT_MOTIFS = [
+  "open_floor",
+  "offset_desks",
+  "pillar_grid",
+  "broken_symmetry",
+  "narrow_throat",
+] as const;
+export type LayoutMotif = (typeof LAYOUT_MOTIFS)[number];
+
+export const EXIT_COUNTS = ["one", "two", "three", "four"] as const;
+export type ExitCount = (typeof EXIT_COUNTS)[number];
+
+export const EXIT_ORIENTATIONS = ["ahead", "left", "right", "behind_only", "split"] as const;
+export type ExitOrientation = (typeof EXIT_ORIENTATIONS)[number];
+
+export const CLUE_BEATS = ["none", "note", "keycard", "false_exit", "graffiti", "radio_static"] as const;
+export type ClueBeat = (typeof CLUE_BEATS)[number];
+
+export const ENTITY_BEHAVIORS = ["stalk", "ambush", "wander", "mimic_door", "absent"] as const;
 export type EntityBehavior = (typeof ENTITY_BEHAVIORS)[number];
+
+export const CUTOFF_DOORS = ["entry", "left", "right", "far", "none"] as const;
+export type CutoffDoor = (typeof CUTOFF_DOORS)[number];
+
+export const ENCOUNTER_CARDS = [
+  "none",
+  "locked_gate_needs_key",
+  "power_flicker_event",
+  "flooded_slow_zone",
+  "safe_alcove",
+] as const;
+export type EncounterCard = (typeof ENCOUNTER_CARDS)[number];
 
 export const AMBIENCES = ["hum", "drip", "footsteps", "silence", "whisper_static"] as const;
 export type Ambience = (typeof AMBIENCES)[number];
 
-export const ENTITY_INTENTS = ["chase", "hide", "flank", "hold"] as const;
+export const ENTITY_INTENTS = ["chase", "hide", "flank", "hold", "cut_off", "bait"] as const;
 export type EntityIntent = (typeof ENTITY_INTENTS)[number];
 
 export const DECIDE_PURPOSES = ["room", "entity"] as const;
@@ -106,6 +135,16 @@ export type CompactRoomMemory = {
   lighting: LightingMode;
   ambience: Ambience;
   hazard: Hazard;
+  encounter?: EncounterCard;
+  motif?: LayoutMotif;
+};
+
+export type DriftProgress = {
+  exitChance: number;
+  lastEncounter: EncounterCard;
+  lastClue: ClueBeat;
+  notesFound: number;
+  roomsSinceEntity: number;
 };
 
 export type CompactGameState = {
@@ -134,6 +173,7 @@ export type CompactGameState = {
     fromArchetype: RoomArchetype | null;
     direction: "n" | "s" | "e" | "w";
   } | null;
+  progress: DriftProgress;
 };
 
 export type RoomDecision = {
@@ -147,11 +187,27 @@ export type RoomDecision = {
   entityBehavior: EntityBehavior;
   ambience: Ambience;
   fearIntensity: number;
+  layoutMotif: LayoutMotif;
+  exitCount: ExitCount;
+  exitOrientation: ExitOrientation;
+  deadEndBait: boolean;
+  deadEndBaitNoul: number;
+  clueBeat: ClueBeat;
+  advancesExit: boolean;
+  advancesExitNoul: number;
+  encounterCard: EncounterCard;
+  cutoffDoor: CutoffDoor;
+  soundBait: boolean;
+  soundBaitNoul: number;
+  entityAggression: number;
 };
 
 export type EntityDecision = {
   intent: EntityIntent;
   aggression: number;
+  cutoffDoor: CutoffDoor;
+  soundBait: boolean;
+  soundBaitNoul: number;
 };
 
 export type RoomLogEntry = {

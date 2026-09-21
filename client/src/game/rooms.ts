@@ -1,5 +1,14 @@
 import * as THREE from "three";
-import { hashString, mulberry32, notesFor, type RoomArchetype, type RoomDecision } from "@liminal/shared";
+import {
+  graffitiFor,
+  hashString,
+  mulberry32,
+  notesFor,
+  orientationWalls,
+  outgoingCount,
+  type RoomArchetype,
+  type RoomDecision,
+} from "@liminal/shared";
 import {
   aabbFromCenter,
   opposite,
@@ -10,6 +19,7 @@ import {
   type Aabb,
   type Wall,
 } from "./math.ts";
+import { makeGraffitiTexture, tex, tiled } from "./textures.ts";
 
 export type PickupKind = "battery" | "keycard" | "note";
 
@@ -29,11 +39,22 @@ export type Door = {
   localZ: number;
   width: number;
   isExit: boolean;
+  isFalseExit: boolean;
+  fake: boolean;
+  locked: boolean;
   connectedRoomId: string | null;
   generation: "idle" | "pending" | "ready";
   pendingSince: number;
   decision: RoomDecision | null;
   shimmer: THREE.Mesh;
+  glitch: THREE.Mesh;
+};
+
+export type RoomLight = {
+  light: THREE.PointLight;
+  base: number;
+  phase: number;
+  tube: THREE.Mesh;
 };
 
 export type BuiltRoom = {
@@ -45,14 +66,18 @@ export type BuiltRoom = {
   bounds: Aabb;
   doors: Door[];
   pickups: Pickup[];
-  lights: Array<{ light: THREE.PointLight; base: number; phase: number }>;
+  lights: RoomLight[];
   water: boolean;
   darkPatch: Aabb | null;
+  alcove: Aabb | null;
   cx: number;
   cz: number;
   yaw: number;
   width: number;
   depth: number;
+  entryWall: Wall;
+  powerFlicker: number;
+  surface: "carpet" | "wet" | "concrete";
 };
 
 const DOOR_W = 1.45;
@@ -60,31 +85,54 @@ const DOOR_H = 2.15;
 const WALL_T = 0.2;
 const HEIGHT = 2.85;
 
+function std(opts: THREE.MeshStandardMaterialParameters): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({
+    roughness: 0.86,
+    metalness: 0.02,
+    ...opts,
+  });
+}
+
 const mats = {
-  wall: new THREE.MeshLambertMaterial({ color: 0xe8d44d }),
-  wallDamp: new THREE.MeshLambertMaterial({ color: 0xcfc24a }),
-  wallExit: new THREE.MeshLambertMaterial({ color: 0xc5d36a }),
-  wallConcrete: new THREE.MeshLambertMaterial({ color: 0xb7ae88 }),
-  carpet: new THREE.MeshLambertMaterial({ color: 0x6e5426 }),
-  carpetWet: new THREE.MeshLambertMaterial({ color: 0x3f4a32 }),
-  ceiling: new THREE.MeshLambertMaterial({ color: 0xc9c3a6 }),
-  frame: new THREE.MeshLambertMaterial({ color: 0x5a4318 }),
-  desk: new THREE.MeshLambertMaterial({ color: 0x8a7340 }),
-  dark: new THREE.MeshLambertMaterial({ color: 0x2a2416 }),
-  water: new THREE.MeshLambertMaterial({ color: 0x2d4036, transparent: true, opacity: 0.42 }),
-  metal: new THREE.MeshLambertMaterial({ color: 0x4a5348 }),
-  card: new THREE.MeshLambertMaterial({ color: 0xc23b2e }),
-  battery: new THREE.MeshLambertMaterial({ color: 0xf2e27a }),
-  paper: new THREE.MeshLambertMaterial({ color: 0xefe6c4 }),
-  stain: new THREE.MeshLambertMaterial({ color: 0x4a3a18, transparent: true, opacity: 0.35 }),
-  shimmer: new THREE.MeshBasicMaterial({
-    color: 0xe8d44d,
-    transparent: true,
-    opacity: 0.22,
-    side: THREE.DoubleSide,
+  wall: std({ color: 0xe4d25a, map: tex.wall, normalMap: tex.wallNorm, roughness: 0.9 }),
+  wallDamp: std({ color: 0xc8c07a, map: tex.wallDamp, normalMap: tex.wallNorm, roughness: 0.88 }),
+  wallExit: std({ color: 0xc5d36a, map: tex.wallExit, normalMap: tex.wallNorm, roughness: 0.88 }),
+  wallConcrete: std({ color: 0xb7ae88, map: tex.concrete, roughness: 0.95 }),
+  carpet: std({
+    color: 0xc4a056,
+    map: tex.carpet,
+    roughnessMap: tex.carpetRough,
+    roughness: 0.58,
+    metalness: 0.06,
   }),
-  lightTube: new THREE.MeshBasicMaterial({ color: 0xfff3c0 }),
-  exitGlow: new THREE.MeshBasicMaterial({ color: 0x6dff6a }),
+  carpetWet: std({
+    color: 0x6e7a52,
+    map: tex.carpetWet,
+    roughnessMap: tex.carpetWetRough,
+    roughness: 0.32,
+    metalness: 0.1,
+  }),
+  ceiling: std({ color: 0xc9c3a6, map: tex.ceiling, roughness: 0.92 }),
+  frame: std({ color: 0x4a3614, roughness: 0.7, metalness: 0.08 }),
+  desk: std({ color: 0x8a7340, roughness: 0.62, metalness: 0.04 }),
+  dark: std({ color: 0x2a2416, roughness: 0.9 }),
+  water: std({
+    color: 0x2d4036,
+    map: tex.water,
+    transparent: true,
+    opacity: 0.46,
+    roughness: 0.18,
+    metalness: 0.12,
+  }),
+  metal: std({ color: 0x4a5348, roughness: 0.42, metalness: 0.55 }),
+  card: std({ color: 0xc23b2e, roughness: 0.35, metalness: 0.15, emissive: 0x3a0808, emissiveIntensity: 0.15 }),
+  battery: std({ color: 0xf2e27a, roughness: 0.4, metalness: 0.2, emissive: 0x4a3a10, emissiveIntensity: 0.2 }),
+  paper: std({ color: 0xefe6c4, roughness: 0.88 }),
+  stain: std({ color: 0x4a3a18, transparent: true, opacity: 0.38, roughness: 0.95 }),
+  lightDead: std({ color: 0x6a6558, roughness: 0.7 }),
+  trim: std({ color: 0x6b5420, roughness: 0.75 }),
+  bars: std({ color: 0x2a2c28, roughness: 0.35, metalness: 0.7 }),
+  alcove: std({ color: 0xc4b24a, map: tex.wall, roughness: 0.86 }),
 };
 
 export function sizeOf(archetype: RoomArchetype, size: RoomDecision["size"]): { w: number; d: number } {
@@ -104,7 +152,7 @@ export function sizeOf(archetype: RoomArchetype, size: RoomDecision["size"]): { 
   return { w: raw.w * mul, d: raw.d * mul };
 }
 
-function wallMaterial(archetype: RoomArchetype): THREE.MeshLambertMaterial {
+function wallMaterial(archetype: RoomArchetype): THREE.MeshStandardMaterial {
   if (archetype === "exit_foyer") return mats.wallExit;
   if (archetype === "stairwell") return mats.wallConcrete;
   if (archetype === "flooded_lobby") return mats.wallDamp;
@@ -125,15 +173,6 @@ function addBox(
   mesh.position.set(x, y, z);
   group.add(mesh);
   return mesh;
-}
-
-function doorSlots(archetype: RoomArchetype): Wall[] {
-  if (archetype === "dead_end") return ["s"];
-  if (archetype === "long_hall") return ["n", "s", "e"];
-  if (archetype === "stairwell") return ["n", "s"];
-  if (archetype === "exit_foyer") return ["s", "n"];
-  if (archetype === "maze_cubicles" || archetype === "flooded_lobby") return ["n", "s", "e", "w"];
-  return ["n", "e", "w"];
 }
 
 export function turnsToAlign(entryLocal: Wall, neededWorldOut: Wall): number {
@@ -194,20 +233,132 @@ export function roomWorldBounds(cx: number, cz: number, w: number, d: number, ya
   return transformAabb(aabbFromCenter(0, HEIGHT / 2, 0, w / 2 + 0.2, HEIGHT / 2, d / 2 + 0.2), cx, cz, yaw);
 }
 
+function planDoors(entryLocal: Wall, decision: RoomDecision): { real: Wall[]; fake: Wall[] } {
+  const archetype = decision.roomArchetype;
+  if (archetype === "exit_foyer") {
+    const ahead = opposite(entryLocal);
+    return { real: [entryLocal, ahead], fake: [] };
+  }
+  if (archetype === "dead_end") {
+    const baitWalls = decision.deadEndBait ? orientationWalls(entryLocal, "ahead").slice(0, 1) : [];
+    return { real: [entryLocal], fake: baitWalls };
+  }
+  const outgoing = Math.min(archetype === "stairwell" ? 2 : 4, outgoingCount(decision.exitCount));
+  const wanted = orientationWalls(entryLocal, decision.exitOrientation).slice(0, outgoing);
+  if (decision.deadEndBait) {
+    return { real: [entryLocal], fake: wanted.slice(0, Math.max(1, wanted.length)) };
+  }
+  return { real: [entryLocal, ...wanted], fake: [] };
+}
+
+function makeDoorVisuals(
+  group: THREE.Group,
+  wall: Wall,
+  pos: { x: number; z: number },
+  kind: "real" | "fake" | "false_exit" | "locked" | "exit",
+): { shimmer: THREE.Mesh; glitch: THREE.Mesh } {
+  addBox(
+    group,
+    mats.frame,
+    wall === "e" || wall === "w" ? pos.x : pos.x - (DOOR_W / 2 + 0.06),
+    DOOR_H / 2,
+    wall === "n" || wall === "s" ? pos.z : pos.z - (DOOR_W / 2 + 0.06),
+    wall === "n" || wall === "s" ? 0.1 : 0.22,
+    DOOR_H,
+    wall === "n" || wall === "s" ? 0.22 : 0.1,
+  );
+  addBox(
+    group,
+    mats.frame,
+    wall === "e" || wall === "w" ? pos.x : pos.x + (DOOR_W / 2 + 0.06),
+    DOOR_H / 2,
+    wall === "n" || wall === "s" ? pos.z : pos.z + (DOOR_W / 2 + 0.06),
+    wall === "n" || wall === "s" ? 0.1 : 0.22,
+    DOOR_H,
+    wall === "n" || wall === "s" ? 0.22 : 0.1,
+  );
+
+  const yaw = wall === "e" ? -Math.PI / 2 : wall === "w" ? Math.PI / 2 : wall === "s" ? Math.PI : 0;
+  const shimmerMat = new THREE.MeshBasicMaterial({
+    color: 0xf3e27a,
+    transparent: true,
+    opacity: 0.0,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const shimmer = new THREE.Mesh(new THREE.PlaneGeometry(DOOR_W * 0.92, DOOR_H * 0.92), shimmerMat);
+  shimmer.position.set(pos.x, DOOR_H / 2, pos.z);
+  shimmer.rotation.y = yaw;
+  shimmer.visible = false;
+  group.add(shimmer);
+
+  const glitchMat = new THREE.MeshBasicMaterial({
+    color: 0x9ad0ff,
+    transparent: true,
+    opacity: 0.0,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const glitch = new THREE.Mesh(new THREE.PlaneGeometry(DOOR_W * 0.86, DOOR_H * 0.86), glitchMat);
+  glitch.position.set(pos.x, DOOR_H / 2, pos.z);
+  glitch.rotation.y = yaw;
+  glitch.visible = false;
+  group.add(glitch);
+
+  if (kind === "fake" || kind === "false_exit") {
+    const seal = new THREE.Mesh(
+      new THREE.PlaneGeometry(DOOR_W * 0.96, DOOR_H * 0.96),
+      std({ color: 0xd6c24a, map: tiled(tex.wall, 0.7, 1.1), roughness: 0.92 }),
+    );
+    seal.position.set(pos.x, DOOR_H / 2, pos.z);
+    seal.rotation.y = yaw;
+    group.add(seal);
+  }
+  if (kind === "false_exit" || kind === "exit") {
+    const sign = addBox(group, new THREE.MeshBasicMaterial({ color: kind === "exit" ? 0x6dff6a : 0x5a8f4a }), pos.x, 2.38, pos.z, 1.05, 0.2, 0.04);
+    sign.rotation.y = yaw;
+    const inset = wall === "n" ? -0.08 : wall === "s" ? 0.08 : 0;
+    const insetX = wall === "e" ? -0.08 : wall === "w" ? 0.08 : 0;
+    sign.position.x += insetX;
+    sign.position.z += inset;
+  }
+  if (kind === "locked") {
+    for (let i = -2; i <= 2; i += 1) {
+      const bar = addBox(group, mats.bars, pos.x, DOOR_H / 2, pos.z, wall === "n" || wall === "s" ? 0.05 : 0.08, DOOR_H * 0.92, wall === "n" || wall === "s" ? 0.08 : 0.05);
+      if (wall === "n" || wall === "s") bar.position.x += i * 0.22;
+      else bar.position.z += i * 0.22;
+    }
+  }
+  return { shimmer, glitch };
+}
+
 function addLight(
   group: THREE.Group,
-  lights: BuiltRoom["lights"],
+  lights: RoomLight[],
   x: number,
   z: number,
   intensity: number,
   decision: RoomDecision,
 ): void {
-  const fixture = addBox(group, mats.lightTube, x, HEIGHT - 0.08, z, 1.4, 0.05, 0.22);
-  if (decision.lighting === "dead") fixture.material = new THREE.MeshLambertMaterial({ color: 0x6a6558 });
-  const light = new THREE.PointLight(0xfff1b0, intensity, 11, 1.6);
-  light.position.set(x, HEIGHT - 0.28, z);
-  group.add(light);
-  lights.push({ light, base: intensity, phase: hashString(`${x}:${z}`) % 100 });
+  addBox(group, mats.metal, x, HEIGHT - 0.04, z, 1.7, 0.08, 0.38);
+  const live = decision.lighting !== "dead";
+  const tubeMat = live
+    ? new THREE.MeshStandardMaterial({
+        color: 0xfff6d0,
+        emissive: 0xfff1b0,
+        emissiveIntensity: 1.4,
+        roughness: 0.25,
+        metalness: 0.1,
+      })
+    : mats.lightDead;
+  const tube = addBox(group, tubeMat, x, HEIGHT - 0.1, z, 1.45, 0.04, 0.16);
+  if (live) {
+    const light = new THREE.PointLight(0xfff1b0, intensity, 14, 1.45);
+    light.position.set(x, HEIGHT - 0.32, z);
+    group.add(light);
+    lights.push({ light, base: intensity, phase: hashString(`${x}:${z}`) % 100, tube });
+  }
 }
 
 function spawnLoot(
@@ -242,45 +393,70 @@ function decorate(
   pickups: Pickup[],
   seed: string,
   colliders: Aabb[],
-): void {
+  entryLocal: Wall,
+): Aabb | null {
   const stain = (x: number, z: number, s: number) => {
-    const mesh = new THREE.Mesh(new THREE.CircleGeometry(s, 10), mats.stain);
+    const mesh = new THREE.Mesh(new THREE.CircleGeometry(s, 14), mats.stain);
     mesh.rotation.x = -Math.PI / 2;
-    mesh.position.set(x, 0.02, z);
+    mesh.position.set(x, 0.018, z);
     group.add(mesh);
   };
-  stain((rng() - 0.5) * w * 0.6, (rng() - 0.5) * d * 0.6, 0.6 + rng());
-  stain((rng() - 0.5) * w * 0.5, (rng() - 0.5) * d * 0.5, 0.4);
+  stain((rng() - 0.5) * w * 0.6, (rng() - 0.5) * d * 0.6, 0.7 + rng());
+  stain((rng() - 0.5) * w * 0.5, (rng() - 0.5) * d * 0.5, 0.45);
 
-  if (archetype === "empty_office") {
-    for (const pos of [
-      [-3, -2],
-      [2.4, 2.1],
-      [-1.2, 3.2],
-    ] as const) {
+  const motif = decision.layoutMotif;
+  if (motif === "narrow_throat") {
+    const inward = { n: { x: 0, z: -1 }, s: { x: 0, z: 1 }, e: { x: -1, z: 0 }, w: { x: 1, z: 0 } }[entryLocal];
+    const side = { n: { x: 1, z: 0 }, s: { x: 1, z: 0 }, e: { x: 0, z: 1 }, w: { x: 0, z: 1 } }[entryLocal];
+    for (const dir of [-1, 1]) {
+      const x = inward.x * 1.35 + side.x * dir * 1.15;
+      const z = inward.z * 1.35 + side.z * dir * 1.15;
+      addBox(group, wallMaterial(archetype), x, 1.15, z, 0.18 + Math.abs(side.z) * 1.4, 2.3, 0.18 + Math.abs(side.x) * 1.4);
+      colliders.push(aabbFromCenter(x, 1.15, z, 0.2 + Math.abs(side.z) * 0.7, 1.15, 0.2 + Math.abs(side.x) * 0.7));
+    }
+  }
+
+  if (motif === "pillar_grid" || archetype === "flooded_lobby") {
+    const cols = archetype === "flooded_lobby" ? 2 : 3;
+    for (let i = 0; i < cols; i += 1) {
+      for (let j = 0; j < cols; j += 1) {
+        const x = -w * 0.28 + (i * w * 0.56) / Math.max(1, cols - 1);
+        const z = -d * 0.28 + (j * d * 0.56) / Math.max(1, cols - 1);
+        if (Math.hypot(x, z) < 1.4) continue;
+        addBox(group, mats.wallDamp, x, 1.3, z, 0.42, 2.6, 0.42);
+        colliders.push(aabbFromCenter(x, 1.3, z, 0.26, 1.3, 0.26));
+      }
+    }
+  }
+
+  const skipOffice = motif === "open_floor";
+  if (archetype === "empty_office" && !skipOffice) {
+    const desks =
+      motif === "broken_symmetry"
+        ? [[2.1, -1.4] as const]
+        : ([
+            [-3, -2],
+            [2.4, 2.1],
+            [-1.2, 3.2],
+          ] as const);
+    for (const pos of desks) {
       if (Math.abs(pos[0]) > w / 2 - 1.4 || Math.abs(pos[1]) > d / 2 - 1.4) continue;
       addBox(group, mats.desk, pos[0], 0.55, pos[1], 1.4, 0.08, 0.7);
       addBox(group, mats.dark, pos[0], 0.28, pos[1], 1.3, 0.46, 0.08);
       addBox(group, mats.dark, pos[0] + 0.7, 0.42, pos[1] + 0.7, 0.36, 0.42, 0.36);
       colliders.push(aabbFromCenter(pos[0], 0.55, pos[1], 0.7, 0.55, 0.36));
     }
-    addBox(group, mats.metal, w * 0.28, 0.7, -d * 0.3, 0.28, 1.1, 0.28);
+    if (motif !== "broken_symmetry") addBox(group, mats.metal, w * 0.28, 0.7, -d * 0.3, 0.28, 1.1, 0.28);
+  }
+
+  if (archetype === "flooded_lobby" || decision.encounterCard === "flooded_slow_zone" || decision.hazard === "puddle_slip") {
+    const water = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.35, d - 0.35), mats.water);
+    water.rotation.x = -Math.PI / 2;
+    water.position.y = 0.06;
+    group.add(water);
   }
 
   if (archetype === "flooded_lobby") {
-    const water = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.4, d - 0.4), mats.water);
-    water.rotation.x = -Math.PI / 2;
-    water.position.y = 0.07;
-    group.add(water);
-    for (const pos of [
-      [-w * 0.22, -d * 0.22],
-      [w * 0.22, -d * 0.22],
-      [-w * 0.22, d * 0.22],
-      [w * 0.22, d * 0.22],
-    ] as const) {
-      addBox(group, mats.wallDamp, pos[0], 1.3, pos[1], 0.55, 2.6, 0.55);
-      colliders.push(aabbFromCenter(pos[0], 1.3, pos[1], 0.32, 1.3, 0.32));
-    }
     addBox(group, mats.desk, 0, 0.55, -d * 0.18, 3.2, 0.12, 1.1);
   }
 
@@ -338,13 +514,40 @@ function decorate(
 
   if (archetype === "exit_foyer") {
     addBox(group, mats.metal, 0, 1.15, d / 2 - 0.28, 1.5, 2.2, 0.12);
-    const sign = addBox(group, mats.exitGlow, 0, 2.35, d / 2 - 0.36, 1.1, 0.22, 0.04);
-    sign.userData.exitSign = true;
+  }
+
+  if (decision.clueBeat === "graffiti") {
+    const text = graffitiFor(seed);
+    const gtex = makeGraffitiTexture(text);
+    const plane = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.6, 1.1),
+      new THREE.MeshStandardMaterial({ map: gtex, transparent: true, roughness: 0.95, metalness: 0 }),
+    );
+    plane.position.set(-w * 0.28, 1.55, -d / 2 + 0.12);
+    group.add(plane);
+  }
+
+  if (decision.clueBeat === "radio_static") {
+    addBox(group, mats.dark, w * 0.22, 0.28, d * 0.18, 0.34, 0.22, 0.22);
+    addBox(group, mats.metal, w * 0.22, 0.48, d * 0.18, 0.16, 0.2, 0.12);
+  }
+
+  let alcoveLocal: Aabb | null = null;
+  if (decision.encounterCard === "safe_alcove") {
+    const ax = -w * 0.32;
+    const az = d * 0.28;
+    addBox(group, mats.alcove, ax, 1.1, az, 2.1, 2.2, 1.6);
+    addBox(group, mats.desk, ax, 0.35, az, 0.7, 0.7, 0.7);
+    const warm = new THREE.PointLight(0xffd9a0, 2.2, 4.5, 2);
+    warm.position.set(ax, 1.4, az);
+    group.add(warm);
+    alcoveLocal = aabbFromCenter(ax, 1, az, 0.85, 1, 0.7);
   }
 
   const lootX = (rng() - 0.5) * (w * 0.4);
   const lootZ = (rng() - 0.5) * (d * 0.35);
   spawnLoot(group, pickups, decision, seed, lootX, lootZ);
+  return alcoveLocal;
 }
 
 export function buildRoom(options: {
@@ -363,7 +566,11 @@ export function buildRoom(options: {
   group.position.set(cx, 0, cz);
   group.rotation.y = yaw;
 
-  const floorMat = archetype === "flooded_lobby" ? mats.carpetWet : mats.carpet;
+  const wet =
+    archetype === "flooded_lobby" || decision.hazard === "puddle_slip" || decision.encounterCard === "flooded_slow_zone";
+  const floorMat = wet ? mats.carpetWet.clone() : mats.carpet.clone();
+  if (floorMat.map) floorMat.map = tiled(floorMat.map, w / 3.2, d / 3.2);
+  if (floorMat.roughnessMap) floorMat.roughnessMap = tiled(floorMat.roughnessMap, w / 3.2, d / 3.2);
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(w, d), floorMat);
   floor.rotation.x = -Math.PI / 2;
   group.add(floor);
@@ -372,50 +579,59 @@ export function buildRoom(options: {
   ceiling.position.y = HEIGHT;
   group.add(ceiling);
 
-  const wallSet = new Set(doorSlots(archetype));
   const entryLocal = rotateWall(options.entryWorldWall, -yawTurns);
-  wallSet.add(entryLocal);
+  const planned = planDoors(entryLocal, decision);
+  const openingWalls = new Set<Wall>([...planned.real, ...planned.fake]);
 
   const collidersLocal: Aabb[] = [];
-  const lights: BuiltRoom["lights"] = [];
+  const lights: RoomLight[] = [];
   const pickups: Pickup[] = [];
   const doors: Door[] = [];
 
   for (const wall of ["n", "s", "e", "w"] as const) {
-    const hasDoor = wallSet.has(wall);
-    for (const seg of wallSegments(wall, w, d, hasDoor)) {
-      addBox(group, wallMaterial(archetype), seg.x, HEIGHT / 2, seg.z, seg.sx, HEIGHT, seg.sz);
+    const hasOpening = openingWalls.has(wall);
+    for (const seg of wallSegments(wall, w, d, hasOpening)) {
+      const wmat = wallMaterial(archetype).clone();
+      if (wmat.map) wmat.map = tiled(wmat.map, Math.max(seg.sx, seg.sz) / 2.2, HEIGHT / 2.4);
+      addBox(group, wmat, seg.x, HEIGHT / 2, seg.z, seg.sx, HEIGHT, seg.sz);
       collidersLocal.push(aabbFromCenter(seg.x, HEIGHT / 2, seg.z, seg.sx / 2, HEIGHT / 2, seg.sz / 2));
     }
-    if (hasDoor) {
+    const mid = wall === "n" || wall === "s" ? { x: 0, z: wall === "n" ? d / 2 : -d / 2 } : { x: wall === "e" ? w / 2 : -w / 2, z: 0 };
+    addBox(
+      group,
+      mats.trim,
+      mid.x,
+      0.08,
+      mid.z,
+      wall === "n" || wall === "s" ? w : 0.08,
+      0.16,
+      wall === "n" || wall === "s" ? 0.08 : d,
+    );
+
+    if (hasOpening) {
       const pos = localDoorPos(wall, w, d);
-      addBox(
+      const isEntry = wall === entryLocal;
+      const isExit = archetype === "exit_foyer" && wall === opposite(entryLocal);
+      const fake = planned.fake.includes(wall);
+      const falseExit = fake && decision.clueBeat === "false_exit";
+      const lockThis =
+        !isEntry &&
+        !fake &&
+        !isExit &&
+        decision.encounterCard === "locked_gate_needs_key" &&
+        planned.real.filter((item) => item !== entryLocal)[0] === wall;
+      const visuals = makeDoorVisuals(
         group,
-        mats.frame,
-        wall === "e" || wall === "w" ? pos.x : pos.x - (DOOR_W / 2 + 0.06),
-        DOOR_H / 2,
-        wall === "n" || wall === "s" ? pos.z : pos.z - (DOOR_W / 2 + 0.06),
-        wall === "n" || wall === "s" ? 0.1 : 0.22,
-        DOOR_H,
-        wall === "n" || wall === "s" ? 0.22 : 0.1,
+        wall,
+        pos,
+        isExit ? "exit" : lockThis ? "locked" : falseExit ? "false_exit" : fake ? "fake" : "real",
       );
-      addBox(
-        group,
-        mats.frame,
-        wall === "e" || wall === "w" ? pos.x : pos.x + (DOOR_W / 2 + 0.06),
-        DOOR_H / 2,
-        wall === "n" || wall === "s" ? pos.z : pos.z + (DOOR_W / 2 + 0.06),
-        wall === "n" || wall === "s" ? 0.1 : 0.22,
-        DOOR_H,
-        wall === "n" || wall === "s" ? 0.22 : 0.1,
-      );
-      const shimmer = new THREE.Mesh(new THREE.PlaneGeometry(DOOR_W * 0.92, DOOR_H * 0.92), mats.shimmer.clone());
-      shimmer.position.set(pos.x, DOOR_H / 2, pos.z);
-      if (wall === "e") shimmer.rotation.y = -Math.PI / 2;
-      if (wall === "w") shimmer.rotation.y = Math.PI / 2;
-      if (wall === "s") shimmer.rotation.y = Math.PI;
-      shimmer.visible = false;
-      group.add(shimmer);
+      if (fake || lockThis) {
+        const out = wallNormal(wall);
+        collidersLocal.push(
+          aabbFromCenter(pos.x + out.x * 0.22, 1.1, pos.z + out.z * 0.22, 0.55, 1.1, 0.55),
+        );
+      }
       doors.push({
         id: `${id}-${wall}`,
         wall,
@@ -423,30 +639,40 @@ export function buildRoom(options: {
         localX: pos.x,
         localZ: pos.z,
         width: DOOR_W,
-        isExit: archetype === "exit_foyer" && wall === "n",
+        isExit,
+        isFalseExit: falseExit || (!fake && decision.clueBeat === "false_exit" && wall === opposite(entryLocal) && archetype !== "exit_foyer"),
+        fake,
+        locked: lockThis,
         connectedRoomId: null,
-        generation: "idle",
+        generation: isEntry ? "ready" : "idle",
         pendingSince: 0,
         decision: null,
-        shimmer,
+        shimmer: visuals.shimmer,
+        glitch: visuals.glitch,
       });
     }
   }
 
+  if (decision.clueBeat === "false_exit" && !doors.some((door) => door.isFalseExit || door.fake)) {
+    const wall = opposite(entryLocal);
+    const pos = localDoorPos(wall, w, d);
+    makeDoorVisuals(group, wall, pos, "false_exit");
+  }
+
   const dimMul =
-    decision.lighting === "harsh" ? 1.15 : decision.lighting === "dim" ? 0.38 : decision.lighting === "dead" ? 0.08 : 0.7;
+    decision.lighting === "harsh" ? 1.25 : decision.lighting === "dim" ? 0.42 : decision.lighting === "dead" ? 0.0 : 0.82;
   if (archetype === "long_hall") {
-    for (let z = -d / 2 + 2; z < d / 2; z += 3.6) addLight(group, lights, 0, z, 1.6 * dimMul, decision);
+    for (let z = -d / 2 + 2; z < d / 2; z += 3.6) addLight(group, lights, 0, z, 18 * Math.max(dimMul, 0.05), decision);
   } else if (archetype === "dead_end") {
-    addLight(group, lights, 0, 0, 1.1 * dimMul, decision);
+    addLight(group, lights, 0, 0, 12 * Math.max(dimMul, 0.05), decision);
   } else {
-    addLight(group, lights, -w * 0.22, -d * 0.2, 1.5 * dimMul, decision);
-    addLight(group, lights, w * 0.2, d * 0.18, 1.4 * dimMul, decision);
-    if (w > 10) addLight(group, lights, 0, 0, 1.2 * dimMul, decision);
+    addLight(group, lights, -w * 0.22, -d * 0.2, 16 * Math.max(dimMul, 0.05), decision);
+    addLight(group, lights, w * 0.2, d * 0.18, 15 * Math.max(dimMul, 0.05), decision);
+    if (w > 10) addLight(group, lights, 0, 0, 13 * Math.max(dimMul, 0.05), decision);
   }
 
   const rng = mulberry32(hashString(id));
-  decorate(group, archetype, w, d, rng, decision, pickups, id, collidersLocal);
+  const alcoveLocal = decorate(group, archetype, w, d, rng, decision, pickups, id, collidersLocal, entryLocal);
 
   let darkPatch: Aabb | null = null;
   if (decision.hazard === "dark_patch") {
@@ -454,6 +680,7 @@ export function buildRoom(options: {
   }
 
   const colliders = collidersLocal.map((box) => transformAabb(box, cx, cz, yaw));
+  const alcove = alcoveLocal ? transformAabb(alcoveLocal, cx, cz, yaw) : null;
   return {
     id,
     archetype,
@@ -464,13 +691,17 @@ export function buildRoom(options: {
     doors,
     pickups,
     lights,
-    water: archetype === "flooded_lobby" || decision.hazard === "puddle_slip",
+    water: wet,
     darkPatch,
+    alcove,
     cx,
     cz,
     yaw,
     width: w,
     depth: d,
+    entryWall: entryLocal,
+    powerFlicker: decision.encounterCard === "power_flicker_event" ? 2.4 : 0,
+    surface: archetype === "stairwell" ? "concrete" : wet ? "wet" : "carpet",
   };
 }
 
@@ -484,6 +715,18 @@ export function doorOutward(room: BuiltRoom, door: Door): { x: number; z: number
   return rotateY(local.x, local.z, room.yaw);
 }
 
+export function resolveCutoffDoor(room: BuiltRoom, cutoff: RoomDecision["cutoffDoor"] | undefined): Door | null {
+  if (!cutoff || cutoff === "none") return null;
+  const entry = room.doors.find((door) => door.wall === room.entryWall);
+  if (cutoff === "entry") return entry ?? null;
+  const left = room.doors.find((door) => door.wall === rotateWall(room.entryWall, 1) && !door.fake);
+  const right = room.doors.find((door) => door.wall === rotateWall(room.entryWall, -1) && !door.fake);
+  const far = room.doors.find((door) => door.wall === opposite(room.entryWall) && !door.fake);
+  if (cutoff === "left") return left ?? far ?? null;
+  if (cutoff === "right") return right ?? far ?? null;
+  return far ?? left ?? right ?? null;
+}
+
 export function placeAgainstDoor(
   parent: BuiltRoom,
   parentDoor: Door,
@@ -491,11 +734,10 @@ export function placeAgainstDoor(
 ): { cx: number; cz: number; yawTurns: number; entryWorldWall: Wall } {
   const out = doorOutward(parent, parentDoor);
   const neededEntryWorld = opposite(parentDoor.worldWall);
-  const slots = doorSlots(decision.roomArchetype);
-  const preferredLocal = slots.includes("s") ? "s" : slots[0] ?? "s";
+  const preferredLocal = "s";
   const yawTurns = turnsToAlign(preferredLocal, neededEntryWorld);
-  const { w, d } = sizeOf(decision.roomArchetype, decision.size);
-  const half = preferredLocal === "n" || preferredLocal === "s" ? d / 2 : w / 2;
+  const { d } = sizeOf(decision.roomArchetype, decision.size);
+  const half = d / 2;
   const parentPos = doorWorldPos(parent, parentDoor);
   return {
     cx: parentPos.x + out.x * (half + 0.02),
@@ -509,13 +751,26 @@ export function startRoomDecision(): RoomDecision {
   return {
     roomArchetype: "empty_office",
     size: "standard",
-    lighting: "harsh",
+    lighting: "flickering",
     hazard: "none",
     loot: "battery",
     entityPresent: false,
     entityPresentNoul: 0.05,
     entityBehavior: "absent",
     ambience: "hum",
-    fearIntensity: 0.4,
+    fearIntensity: 0.45,
+    layoutMotif: "offset_desks",
+    exitCount: "three",
+    exitOrientation: "split",
+    deadEndBait: false,
+    deadEndBaitNoul: 0.05,
+    clueBeat: "none",
+    advancesExit: false,
+    advancesExitNoul: 0.08,
+    encounterCard: "none",
+    cutoffDoor: "none",
+    soundBait: false,
+    soundBaitNoul: 0.04,
+    entityAggression: 0.2,
   };
 }

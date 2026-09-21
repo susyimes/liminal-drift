@@ -2,6 +2,7 @@ import * as THREE from "three";
 import {
   ROOM_PREFETCH_TIMEOUT_MS,
   type CompactGameState,
+  type EncounterCard,
   type GenerationSource,
   type RoomDecision,
   type RoomLogEntry,
@@ -37,6 +38,9 @@ export class World {
   callCount = 0;
   jevCalls = 0;
   fallbackCalls = 0;
+  exitChance = 0;
+  roomsSinceEntity = 0;
+  lastEncounter: EncounterCard = "none";
   private seq = 1;
   private scene: THREE.Scene;
 
@@ -84,8 +88,10 @@ export class World {
     for (const room of this.rooms.values()) {
       for (const door of room.doors) {
         const sealExit = door.isExit;
-        const sealPending = !door.connectedRoomId && door.generation !== "ready" && !door.isExit;
-        if (!sealExit && !sealPending) continue;
+        const sealFake = door.fake || door.isFalseExit;
+        const sealLocked = door.locked;
+        const sealPending = !door.connectedRoomId && door.generation !== "ready" && !door.isExit && !door.fake;
+        if (!sealExit && !sealPending && !sealFake && !sealLocked) continue;
         const pos = doorWorldPos(room, door);
         const out = doorOutward(room, door);
         extra.push({
@@ -178,24 +184,38 @@ export class World {
     return any ? doorWorldPos(from, any) : null;
   }
 
-  updateLights(time: number, fear: number): void {
+  updateLights(time: number, fear: number, dt = 0.016): void {
     for (const room of this.rooms.values()) {
+      if (room.powerFlicker > 0) room.powerFlicker = Math.max(0, room.powerFlicker - dt);
       const near = room.id === this.currentId || this.hopsBetween(this.currentId, room.id) <= 1;
       for (const entry of room.lights) {
         entry.light.visible = near;
         if (!near) continue;
-        const flicker =
-          room.decision.lighting === "flickering" || room.decision.hazard === "buzzing_overload"
-            ? 0.55 + Math.abs(Math.sin(time * 18 + entry.phase)) * 0.45 + (Math.sin(time * 47 + entry.phase) > 0.92 ? 0.5 : 0)
-            : 1;
-        const fearDim = 1 - fear * 0.004;
-        entry.light.intensity = entry.base * flicker * fearDim;
+        const buzzing = room.decision.lighting === "flickering" || room.decision.hazard === "buzzing_overload";
+        const drop = buzzing && Math.sin(time * 47 + entry.phase) > 0.91 ? 0.15 + Math.abs(Math.sin(time * 80)) * 0.35 : 1;
+        const buzz = buzzing ? 0.72 + Math.abs(Math.sin(time * 19 + entry.phase)) * 0.28 : 1;
+        const blackout = room.powerFlicker > 0 ? (room.powerFlicker > 1.4 ? 0.04 : 0.15 + Math.abs(Math.sin(time * 36)) * 0.55) : 1;
+        const fearDim = 1 - fear * 0.0035;
+        const here = room.id === this.currentId;
+        const flicker = buzz * drop * blackout * fearDim * (here ? 1 : 0.42);
+        entry.light.intensity = entry.base * flicker;
+        entry.light.color.setHex(here ? 0xfff1b0 : 0x8fa0b4);
+        const tube = entry.tube.material;
+        if (tube instanceof THREE.MeshStandardMaterial && tube.emissiveIntensity !== undefined) {
+          tube.emissiveIntensity = 0.25 + flicker * 1.35;
+        }
       }
       for (const door of room.doors) {
         const pending = door.generation === "pending";
-        door.shimmer.visible = pending;
+        const readyFresh = door.generation === "ready" && !door.connectedRoomId && !door.fake && !door.isExit;
+        door.shimmer.visible = pending || readyFresh;
+        door.glitch.visible = pending;
         if (pending) {
-          (door.shimmer.material as THREE.MeshBasicMaterial).opacity = 0.12 + Math.abs(Math.sin(time * 14)) * 0.28;
+          (door.shimmer.material as THREE.MeshBasicMaterial).opacity = 0.28 + Math.abs(Math.sin(time * 18)) * 0.42;
+          (door.glitch.material as THREE.MeshBasicMaterial).opacity = 0.08 + Math.abs(Math.sin(time * 41 + 1.2)) * 0.35;
+          door.glitch.position.y = 1.07 + Math.sin(time * 22) * 0.05;
+        } else if (readyFresh) {
+          (door.shimmer.material as THREE.MeshBasicMaterial).opacity = 0.08 + Math.abs(Math.sin(time * 6)) * 0.08;
         }
       }
     }
@@ -208,6 +228,7 @@ export class World {
       const pos = doorWorldPos(here, door);
       const dist = Math.hypot(pos.x - px, pos.z - pz);
       if (dist > 5.4) continue;
+      if (door.fake || door.locked || door.isFalseExit) continue;
       if (door.generation === "idle") {
         door.generation = "pending";
         door.pendingSince = performance.now();
@@ -219,7 +240,7 @@ export class World {
   }
 
   tryEnter(px: number, pz: number, compact: CompactGameState): {
-    kind: "none" | "entered" | "waiting" | "exit" | "locked";
+    kind: "none" | "entered" | "waiting" | "exit" | "locked" | "fake";
     room?: BuiltRoom;
     waiting?: boolean;
   } {
@@ -230,6 +251,16 @@ export class World {
     const pos = doorWorldPos(room, door);
     const side = (px - pos.x) * out.x + (pz - pos.z) * out.z;
     if (side < 0.08) return { kind: "none" };
+
+    if (door.fake || door.isFalseExit) return { kind: "fake" };
+
+    if (door.locked) {
+      if (compact.player.hasKeycard) {
+        door.locked = false;
+      } else {
+        return { kind: "locked" };
+      }
+    }
 
     if (door.isExit) {
       if (compact.player.hasKeycard || compact.depth >= 12) return { kind: "exit" };
@@ -335,6 +366,11 @@ export class World {
     this.addRoom(built);
     this.roomsVisited += 1;
     this.currentId = built.id;
+    this.lastEncounter = decision.encounterCard;
+    if (decision.advancesExit) {
+      this.exitChance = Math.min(1, this.exitChance + 0.12 + decision.advancesExitNoul * 0.1);
+    }
+    this.roomsSinceEntity = decision.entityPresent ? 0 : this.roomsSinceEntity + 1;
     this.log.push({
       depth: this.roomsVisited,
       roomId: built.id,
