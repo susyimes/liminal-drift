@@ -121,6 +121,38 @@ export class World {
     return best;
   }
 
+  nearestDoorIn(room: BuiltRoom, x: number, z: number): { door: Door; dist: number } | null {
+    let best: { door: Door; dist: number } | null = null;
+    for (const door of room.doors) {
+      const pos = doorWorldPos(room, door);
+      const dist = Math.hypot(pos.x - x, pos.z - z);
+      if (!best || dist < best.dist) best = { door, dist };
+    }
+    return best;
+  }
+
+  findUnexploredDoor(fromId = this.currentId): { room: BuiltRoom; door: Door } | null {
+    const start = this.rooms.get(fromId) ?? this.current;
+    const queue: BuiltRoom[] = [start];
+    const seen = new Set<string>([start.id]);
+    while (queue.length) {
+      const room = queue.shift()!;
+      const open = room.doors.find(
+        (door) => !door.connectedRoomId && !door.fake && !door.isFalseExit && !door.isExit && !door.locked,
+      );
+      if (open) return { room, door: open };
+      for (const door of room.doors) {
+        const nextId = door.connectedRoomId;
+        if (!nextId || seen.has(nextId)) continue;
+        const next = this.rooms.get(nextId);
+        if (!next) continue;
+        seen.add(nextId);
+        queue.push(next);
+      }
+    }
+    return null;
+  }
+
   pickupNear(x: number, z: number): { room: BuiltRoom; pickup: Pickup } | null {
     for (const room of this.rooms.values()) {
       for (const pickup of room.pickups) {
@@ -248,7 +280,12 @@ export class World {
     room?: BuiltRoom;
     waiting?: boolean;
   } {
-    const hit = this.nearestDoor(px, pz);
+    const global = this.nearestDoor(px, pz);
+    const local = this.nearestDoorIn(this.current, px, pz);
+    const hit =
+      local && local.dist <= 1.15 && (!global || local.dist <= global.dist + 0.35)
+        ? { room: this.current, door: local.door, dist: local.dist }
+        : global;
     if (!hit || hit.dist > 1.15) return { kind: "none" };
     const { room, door } = hit;
     const out = doorOutward(room, door);

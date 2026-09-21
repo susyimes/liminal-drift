@@ -113,20 +113,19 @@ export class Game {
     source: GenerationSource;
     warning: string | null;
   }> {
-    const room = this.world.current;
-    const door =
-      room.doors.find((d) => !d.connectedRoomId && !d.fake && !d.isFalseExit && !d.isExit && !d.locked) ??
-      room.doors.find((d) => Boolean(d.connectedRoomId) && d.connectedRoomId !== room.id && !d.fake);
-    if (!door) {
+    const found = this.world.findUnexploredDoor();
+    if (!found) {
       return {
         kind: "none",
         depth: this.world.roomsVisited,
-        roomId: room.id,
-        archetype: room.archetype,
+        roomId: this.world.currentId,
+        archetype: this.world.current.archetype,
         source: this.world.lastSource,
         warning: "no_open_door",
       };
     }
+    const { room, door } = found;
+    this.world.currentId = room.id;
     this.placeAtDoor(room, door, -0.32);
     const compact = this.compactState();
     await this.world.considerPrefetch(this.player.x, this.player.z, compact);
@@ -134,9 +133,14 @@ export class Game {
     while (!door.decision && !door.connectedRoomId && performance.now() < deadline) {
       await new Promise((resolve) => window.setTimeout(resolve, 25));
     }
-    this.placeAtDoor(room, door, 0.18);
+    this.placeAtDoor(room, door, 0.12);
     const portal = this.world.tryEnter(this.player.x, this.player.z, this.compactState());
-    if (portal.kind === "entered") this.nudgeThroughDoor();
+    if (portal.kind === "entered") {
+      this.nudgeThroughDoor();
+      const dest = this.world.current;
+      this.player.x = dest.cx;
+      this.player.z = dest.cz;
+    }
     return {
       kind: portal.kind,
       depth: this.world.roomsVisited,
