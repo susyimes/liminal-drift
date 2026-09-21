@@ -28,6 +28,21 @@ ui.bind(game, () => {
   void begin();
 });
 
+const playtestCount = Number(new URLSearchParams(location.search).get("playtest") || "0");
+if (Number.isFinite(playtestCount) && playtestCount > 0) {
+  void (async () => {
+    await begin();
+    const log: unknown[] = [];
+    for (let i = 0; i < playtestCount; i += 1) {
+      const step = await game.stepUnexploredDoor();
+      log.push(step);
+      if (step.kind !== "entered") break;
+    }
+    (window as Window & { __liminalPlaytest?: unknown }).__liminalPlaytest = log;
+    console.info("[liminal-playtest]", log);
+  })();
+}
+
 function frame(): void {
   if (game.mode === "playing") ui.paint(game.hud());
   if (game.mode === "over" && !ui.over.classList.contains("shown")) {
