@@ -76,7 +76,7 @@ export function walkIntent(keys: Iterable<string>, stickX = 0, stickY = 0): { x:
     ix /= mag;
     iz /= mag;
   }
-  return { x: ix, z: iz };
+  return { x: ix || 0, z: iz || 0 };
 }
 
 export class Input {
