@@ -686,7 +686,7 @@ export function buildRoom(options: {
     width: w,
     depth: d,
     entryWall: entryLocal,
-    powerFlicker: decision.encounterCard === "power_flicker_event" ? 2.4 : 0,
+    powerFlicker: decision.encounterCard === "power_flicker_event" ? 1.7 : 0,
     surface: archetype === "stairwell" ? "concrete" : wet ? "wet" : "carpet",
   };
 }

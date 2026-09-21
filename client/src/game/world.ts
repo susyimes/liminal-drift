@@ -9,7 +9,8 @@ import {
   type RoomLogEntry,
 } from "@liminal/shared";
 import { requestRoom } from "../api.ts";
-import { doorAwaitingDecision, doorNeedsForcedFallback } from "./doors.ts";
+import { connectedDoorShouldEnter, doorAwaitingDecision, doorNeedsForcedFallback } from "./doors.ts";
+import { DOOR_SHIMMER_NEAR, doorGlitchOpacity, doorShimmerOpacity, tubeFlickerMul } from "./lighting.ts";
 import {
   aabbsOverlap,
   dist2,
@@ -218,38 +219,42 @@ export class World {
     return any ? doorWorldPos(from, any) : null;
   }
 
-  updateLights(time: number, fear: number, dt = 0.016): void {
+  updateLights(time: number, fear: number, dt = 0.016, px = 0, pz = 0): void {
     for (const room of this.rooms.values()) {
       if (room.powerFlicker > 0) room.powerFlicker = Math.max(0, room.powerFlicker - dt);
       const near = room.id === this.currentId || this.hopsBetween(this.currentId, room.id) <= 1;
+      const here = room.id === this.currentId;
+      const buzzing = room.decision.lighting === "flickering" || room.decision.hazard === "buzzing_overload";
       for (const entry of room.lights) {
-        entry.light.visible = near;
+        if (entry.light.visible !== near) entry.light.visible = near;
         if (!near) continue;
-        const buzzing = room.decision.lighting === "flickering" || room.decision.hazard === "buzzing_overload";
-        const drop = buzzing && Math.sin(time * 47 + entry.phase) > 0.91 ? 0.15 + Math.abs(Math.sin(time * 80)) * 0.35 : 1;
-        const buzz = buzzing ? 0.72 + Math.abs(Math.sin(time * 19 + entry.phase)) * 0.28 : 1;
-        const blackout = room.powerFlicker > 0 ? (room.powerFlicker > 1.4 ? 0.04 : 0.15 + Math.abs(Math.sin(time * 36)) * 0.55) : 1;
-        const fearDim = 1 - fear * 0.0035;
-        const here = room.id === this.currentId;
-        const flicker = buzz * drop * blackout * fearDim * (here ? 1 : 0.42);
+        const flicker = tubeFlickerMul({
+          buzzing,
+          powerFlicker: room.powerFlicker,
+          time,
+          phase: entry.phase,
+          fear,
+          here,
+        });
         entry.light.intensity = entry.base * flicker;
         entry.light.color.setHex(here ? 0xfff1b0 : 0x8fa0b4);
         const tube = entry.tube.material;
         if (tube instanceof THREE.MeshStandardMaterial && tube.emissiveIntensity !== undefined) {
-          tube.emissiveIntensity = 0.25 + flicker * 1.35;
+          tube.emissiveIntensity = 0.55 + flicker * 0.7;
         }
       }
       for (const door of room.doors) {
-        const pending = door.generation === "pending";
-        const readyFresh = door.generation === "ready" && !door.connectedRoomId && !door.fake && !door.isExit;
-        door.shimmer.visible = pending || readyFresh;
-        door.glitch.visible = pending;
-        if (pending) {
-          (door.shimmer.material as THREE.MeshBasicMaterial).opacity = 0.28 + Math.abs(Math.sin(time * 18)) * 0.42;
-          (door.glitch.material as THREE.MeshBasicMaterial).opacity = 0.08 + Math.abs(Math.sin(time * 41 + 1.2)) * 0.35;
-          door.glitch.position.y = 1.07 + Math.sin(time * 22) * 0.05;
-        } else if (readyFresh) {
-          (door.shimmer.material as THREE.MeshBasicMaterial).opacity = 0.03 + Math.abs(Math.sin(time * 6)) * 0.03;
+        const connected = Boolean(door.connectedRoomId);
+        const pending = !connected && door.generation === "pending";
+        const pos = doorWorldPos(room, door);
+        const close = Math.hypot(pos.x - px, pos.z - pz) < DOOR_SHIMMER_NEAR;
+        const showPending = pending && close;
+        if (door.shimmer.visible !== showPending) door.shimmer.visible = showPending;
+        if (door.glitch.visible !== showPending) door.glitch.visible = showPending;
+        if (showPending) {
+          (door.shimmer.material as THREE.MeshBasicMaterial).opacity = doorShimmerOpacity("pending", time);
+          (door.glitch.material as THREE.MeshBasicMaterial).opacity = doorGlitchOpacity(time);
+          door.glitch.position.y = 1.07 + Math.sin(time * 1.9) * 0.012;
         }
       }
     }
@@ -311,6 +316,9 @@ export class World {
     }
 
     if (door.connectedRoomId) {
+      if (!connectedDoorShouldEnter(this.currentId, room.id, door.connectedRoomId, side)) {
+        return { kind: "none" };
+      }
       this.currentId = door.connectedRoomId;
       return { kind: "entered", room: this.rooms.get(door.connectedRoomId) };
     }
@@ -355,6 +363,12 @@ export class World {
     const { room, door } = hit;
     if (door.fake || door.isFalseExit || door.isExit || door.locked) return { kind: "none" };
     if (door.connectedRoomId) {
+      const out = doorOutward(room, door);
+      const pos = doorWorldPos(room, door);
+      const side = (px - pos.x) * out.x + (pz - pos.z) * out.z;
+      if (!connectedDoorShouldEnter(this.currentId, room.id, door.connectedRoomId, side)) {
+        return { kind: "none" };
+      }
       this.currentId = door.connectedRoomId;
       return { kind: "entered", room: this.rooms.get(door.connectedRoomId) };
     }

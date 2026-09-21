@@ -31,3 +31,22 @@ export function doorNeedsForcedFallback(door: {
   if (door.connectedRoomId) return false;
   return door.generation === "pending" && doorGenerationTimedOut(door.pendingSince, now, timeoutMs);
 }
+
+/**
+ * Already-linked doorway: only change rooms when the player actually
+ * crosses through. Standing just inside a newly spawned room must not
+ * re-fire "entered" every frame (that strobed lights + enterBeat).
+ *
+ * `side` is the player offset along the door's outward normal
+ * (positive = outside the door's room).
+ */
+export function connectedDoorShouldEnter(
+  currentId: string,
+  doorRoomId: string,
+  connectedRoomId: string,
+  side: number,
+): boolean {
+  if (currentId === connectedRoomId) return false;
+  if (currentId === doorRoomId) return side >= 0.14;
+  return side <= -0.14;
+}
