@@ -229,6 +229,11 @@ export class Game {
       this.status = "The doorway is still deciding what it is.";
     } else if (portal.kind === "entered" && portal.room) {
       this.nudgeThroughDoor();
+      if (!this.world.roomAt(this.player.x, this.player.z)) {
+        this.player.x = portal.room.cx;
+        this.player.z = portal.room.cz;
+      }
+      this.world.currentId = portal.room.id;
       this.entity.grace = 1.8;
       this.onEnter(portal.room);
     } else if (portal.kind === "exit") {
