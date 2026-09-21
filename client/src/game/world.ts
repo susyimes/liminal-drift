@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import {
   ROOM_PREFETCH_TIMEOUT_MS,
+  fallbackRoomDecision,
   type CompactGameState,
   type EncounterCard,
   type GenerationSource,
@@ -8,6 +9,7 @@ import {
   type RoomLogEntry,
 } from "@liminal/shared";
 import { requestRoom } from "../api.ts";
+import { doorAwaitingDecision, doorGenerationTimedOut } from "./doors.ts";
 import {
   aabbsOverlap,
   dist2,
@@ -227,14 +229,16 @@ export class World {
       if (door.connectedRoomId || door.isExit) continue;
       const pos = doorWorldPos(here, door);
       const dist = Math.hypot(pos.x - px, pos.z - pz);
-      if (dist > 5.4) continue;
+      if (dist > 7.2) continue;
       if (door.fake || door.locked || door.isFalseExit) continue;
-      if (door.generation === "idle") {
+      if (door.generation === "pending" && doorGenerationTimedOut(door.pendingSince, performance.now(), ROOM_PREFETCH_TIMEOUT_MS)) {
+        this.finishWithFallback(here, door, compact, "Generation timed out — using fallback.");
+        continue;
+      }
+      if (doorAwaitingDecision(door)) {
         door.generation = "pending";
         door.pendingSince = performance.now();
         this.prefetch(here, door, compact);
-      } else if (door.generation === "pending" && performance.now() - door.pendingSince > ROOM_PREFETCH_TIMEOUT_MS + 80) {
-        // requestRoom already falls back; this is a safety latch
       }
     }
   }
@@ -250,7 +254,9 @@ export class World {
     const out = doorOutward(room, door);
     const pos = doorWorldPos(room, door);
     const side = (px - pos.x) * out.x + (pz - pos.z) * out.z;
-    if (side < 0.08) return { kind: "none" };
+    // Allow crossing from just inside the jamb. The old 0.08 outward-only
+    // check required walking through a still-sealed portal to start generation.
+    if (side < -0.55) return { kind: "none" };
 
     if (door.fake || door.isFalseExit) return { kind: "fake" };
 
@@ -272,12 +278,29 @@ export class World {
       return { kind: "entered", room: this.rooms.get(door.connectedRoomId) };
     }
 
-    if (door.generation === "ready" && door.decision) {
-      const spawned = this.spawnFrom(room, door, door.decision, this.lastSource, this.lastLatency);
-      return { kind: "entered", room: spawned ?? undefined };
+    if (door.generation === "pending" && doorGenerationTimedOut(door.pendingSince, performance.now(), ROOM_PREFETCH_TIMEOUT_MS)) {
+      this.finishWithFallback(room, door, compact, "Generation timed out — using fallback.");
     }
 
-    if (door.generation === "idle") {
+    if (door.decision) {
+      try {
+        const spawned = this.spawnFrom(room, door, door.decision, this.lastSource, this.lastLatency);
+        return { kind: "entered", room: spawned ?? undefined };
+      } catch {
+        try {
+          const fallback = fallbackRoomDecision(
+            { ...compact, purpose: "room", portal: { id: door.id, fromArchetype: room.archetype, direction: door.worldWall } },
+            door.id,
+          );
+          const spawned = this.spawnFrom(room, door, fallback, "fallback", this.lastLatency);
+          return { kind: "entered", room: spawned ?? undefined };
+        } catch {
+          return { kind: "waiting", waiting: true };
+        }
+      }
+    }
+
+    if (doorAwaitingDecision(door) || door.generation === "idle") {
       door.generation = "pending";
       door.pendingSince = performance.now();
       this.prefetch(room, door, compact);
@@ -295,15 +318,54 @@ export class World {
         direction: door.worldWall,
       },
     };
-    const result = await requestRoom(state, ROOM_PREFETCH_TIMEOUT_MS);
-    this.callCount += 1;
-    this.lastLatency = result.latencyMs;
-    this.lastSource = result.source;
-    this.lastWarning = result.warning ?? null;
-    if (result.source === "jev") this.jevCalls += 1;
-    else this.fallbackCalls += 1;
-    door.decision = result.decision;
+    try {
+      const result = await requestRoom(state, ROOM_PREFETCH_TIMEOUT_MS);
+      if (door.connectedRoomId) return;
+      if (!result?.decision) throw new Error("missing_decision");
+      this.callCount += 1;
+      this.lastLatency = result.latencyMs;
+      this.lastSource = result.source;
+      this.lastWarning = result.warning ?? null;
+      if (result.source === "jev") this.jevCalls += 1;
+      else this.fallbackCalls += 1;
+      door.decision = result.decision;
+      door.generation = "ready";
+    } catch {
+      if (door.connectedRoomId) return;
+      this.finishWithFallback(room, door, compact, "Jev proxy unreachable — using fallback generation.");
+    }
+  }
+
+  private finishWithFallback(
+    room: BuiltRoom,
+    door: Door,
+    compact: CompactGameState,
+    warning: string,
+  ): void {
+    if (door.connectedRoomId) {
+      door.generation = "ready";
+      return;
+    }
+    if (door.decision) {
+      door.generation = "ready";
+      return;
+    }
+    const state: CompactGameState = {
+      ...compact,
+      purpose: "room",
+      portal: {
+        id: door.id,
+        fromArchetype: room.archetype,
+        direction: door.worldWall,
+      },
+    };
+    door.decision = fallbackRoomDecision(state, door.id);
     door.generation = "ready";
+    this.lastSource = "fallback";
+    this.lastWarning = warning;
+    this.lastLatency = ROOM_PREFETCH_TIMEOUT_MS;
+    this.fallbackCalls += 1;
+    this.callCount += 1;
   }
 
   private spawnFrom(
@@ -348,14 +410,13 @@ export class World {
 
     const id = `r${this.seq}`;
     this.seq += 1;
-    const built = buildRoom({
-      id,
-      decision,
-      cx: place.cx,
-      cz: place.cz,
-      yawTurns: place.yawTurns,
-      entryWorldWall: place.entryWorldWall,
-    });
+    const spec = { id, cx: place.cx, cz: place.cz, yawTurns: place.yawTurns, entryWorldWall: place.entryWorldWall };
+    let built: BuiltRoom;
+    try {
+      built = buildRoom({ ...spec, decision });
+    } catch {
+      built = buildRoom({ ...spec, decision: startRoomDecision() });
+    }
     const entry = built.doors.find((d) => d.worldWall === place.entryWorldWall) ?? built.doors[0];
     if (entry) {
       entry.connectedRoomId = parent.id;
