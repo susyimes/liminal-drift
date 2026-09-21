@@ -110,11 +110,10 @@ test("flickering tubes stay in a calm intensity band", () => {
   assert.ok(maxStep < 0.08, `frame step ${maxStep} is still a strobe`);
 });
 
-test("ready-door shimmer is a static veil, pending is a slow breathe", () => {
+test("ready-door shimmer is off; pending is a slow breathe", () => {
   const ready = [0, 0.4, 1.1, 2.2].map((t) => doorShimmerOpacity("ready", t));
-  assert.ok(ready.every((v) => v === ready[0]));
-  assert.ok(ready[0]! <= 0.06);
-  const pending = [0, Math.PI / 4.4, Math.PI / 2.2].map((t) => doorShimmerOpacity("pending", t));
-  assert.ok(Math.max(...pending) <= 0.2);
-  assert.ok(Math.min(...pending) >= 0.09);
+  assert.ok(ready.every((v) => v === 0));
+  const pending = [0, Math.PI / 3.2, Math.PI / 1.6].map((t) => doorShimmerOpacity("pending", t));
+  assert.ok(Math.max(...pending) <= 0.14);
+  assert.ok(Math.min(...pending) >= 0.07);
 });

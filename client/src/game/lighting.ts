@@ -24,10 +24,11 @@ export function tubeFlickerMul(opts: {
 export const DOOR_SHIMMER_NEAR = 3.15;
 
 export function doorShimmerOpacity(kind: "pending" | "ready", time: number): number {
-  if (kind === "pending") return 0.1 + Math.abs(Math.sin(time * 2.2)) * 0.08;
-  return 0.04;
+  // Ready doors stay dark — a lingering veil sat in the player's face after prefetch.
+  if (kind === "ready") return 0;
+  return 0.08 + Math.abs(Math.sin(time * 1.6)) * 0.05;
 }
 
 export function doorGlitchOpacity(time: number): number {
-  return 0.03 + Math.abs(Math.sin(time * 2.8 + 1.2)) * 0.04;
+  return 0.02 + Math.abs(Math.sin(time * 1.8 + 1.2)) * 0.03;
 }

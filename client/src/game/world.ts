@@ -246,21 +246,15 @@ export class World {
       for (const door of room.doors) {
         const connected = Boolean(door.connectedRoomId);
         const pending = !connected && door.generation === "pending";
-        const readyFresh =
-          !connected && door.generation === "ready" && !door.fake && !door.isExit && !door.isFalseExit;
         const pos = doorWorldPos(room, door);
         const close = Math.hypot(pos.x - px, pos.z - pz) < DOOR_SHIMMER_NEAR;
         const showPending = pending && close;
-        const showReady = readyFresh && close;
-        const showShimmer = showPending || showReady;
-        if (door.shimmer.visible !== showShimmer) door.shimmer.visible = showShimmer;
+        if (door.shimmer.visible !== showPending) door.shimmer.visible = showPending;
         if (door.glitch.visible !== showPending) door.glitch.visible = showPending;
         if (showPending) {
           (door.shimmer.material as THREE.MeshBasicMaterial).opacity = doorShimmerOpacity("pending", time);
           (door.glitch.material as THREE.MeshBasicMaterial).opacity = doorGlitchOpacity(time);
-          door.glitch.position.y = 1.07 + Math.sin(time * 3.2) * 0.018;
-        } else if (showReady) {
-          (door.shimmer.material as THREE.MeshBasicMaterial).opacity = doorShimmerOpacity("ready", time);
+          door.glitch.position.y = 1.07 + Math.sin(time * 1.9) * 0.012;
         }
       }
     }

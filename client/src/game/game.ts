@@ -329,7 +329,7 @@ export class Game {
     document.getElementById("vignette")?.style.setProperty("opacity", String(0.5 + this.player.fear / 180 + prox * 0.25));
     document.getElementById("static-overlay")?.style.setProperty(
       "opacity",
-      this.waitingDoor ? "0.14" : this.enterBeat > 0 ? String(this.enterBeat * 0.1) : "0",
+      this.waitingDoor ? "0.07" : this.enterBeat > 0 ? String(this.enterBeat * 0.04) : "0",
     );
     document.getElementById("hurt")?.style.setProperty("opacity", this.hurtFlash > 0 ? String(this.hurtFlash * 0.55) : prox > 0.65 ? String((prox - 0.65) * 1.4) : "0");
     document.getElementById("grade")?.style.setProperty("opacity", String(0.18 + this.player.fear / 280 + this.hurtFlash * 0.35));
