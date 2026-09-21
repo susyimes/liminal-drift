@@ -1,5 +1,6 @@
 import {
   ENCOUNTER_CARDS,
+  WIN_DEPTH,
   type ClueBeat,
   type CompactGameState,
   type DriftProgress,
@@ -7,6 +8,7 @@ import {
   type ExitCount,
   type ExitOrientation,
   type LayoutMotif,
+  type RoomDecision,
 } from "./types.ts";
 
 type WallLike = "n" | "s" | "e" | "w";
@@ -125,4 +127,59 @@ export function orientationWalls(entry: WallLike, orientation: ExitOrientation):
   if (orientation === "left") return [left, ahead];
   if (orientation === "right") return [right, ahead];
   return [left, right, ahead];
+}
+
+/** True dead-ends stay rare until the run is almost over. */
+export function allowIntentionalDeadEnd(depth: number): boolean {
+  return depth >= WIN_DEPTH - 6;
+}
+
+export function planDoorWalls(
+  entryLocal: WallLike,
+  decision: Pick<RoomDecision, "roomArchetype" | "exitCount" | "exitOrientation" | "deadEndBait">,
+): { real: WallLike[]; fake: WallLike[] } {
+  const archetype = decision.roomArchetype;
+  if (archetype === "exit_foyer") {
+    return { real: [entryLocal, oppositeWall(entryLocal)], fake: [] };
+  }
+  if (archetype === "dead_end") {
+    const baitWalls = decision.deadEndBait ? orientationWalls(entryLocal, "ahead").slice(0, 1) : [];
+    return { real: [entryLocal], fake: baitWalls };
+  }
+
+  const outgoing = Math.min(archetype === "stairwell" ? 2 : 4, outgoingCount(decision.exitCount));
+  let wanted = orientationWalls(entryLocal, decision.exitOrientation).slice(0, outgoing);
+  if (wanted.length === 0) wanted = [oppositeWall(entryLocal)];
+
+  // Bait may paint one throat. It must never delete the last real forward door.
+  if (decision.deadEndBait && wanted.length > 1) {
+    return { real: [entryLocal, ...wanted.slice(1)], fake: wanted.slice(0, 1) };
+  }
+  return { real: [entryLocal, ...wanted], fake: [] };
+}
+
+export function ensureTraversableDecision(decision: RoomDecision, depth: number): RoomDecision {
+  const late = allowIntentionalDeadEnd(depth);
+  let next = { ...decision };
+  if (!late && next.roomArchetype === "dead_end") {
+    next.roomArchetype = "empty_office";
+    next.exitCount = "two";
+    next.exitOrientation = "ahead";
+    next.deadEndBait = false;
+    next.deadEndBaitNoul = Math.min(next.deadEndBaitNoul, 0.35);
+  }
+  if (!late && next.exitOrientation === "behind_only") {
+    next.exitOrientation = "ahead";
+    if (next.exitCount === "one") next.exitCount = "two";
+  }
+  if (!late) {
+    next.deadEndBait = false;
+    next.deadEndBaitNoul = Math.min(next.deadEndBaitNoul, 0.4);
+  }
+  if (next.roomArchetype === "exit_foyer") {
+    next.deadEndBait = false;
+    next.exitOrientation = "ahead";
+    next.exitCount = "one";
+  }
+  return next;
 }

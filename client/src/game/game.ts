@@ -218,13 +218,22 @@ export class Game {
 
     const compact = this.compactState();
     void this.world.considerPrefetch(this.player.x, this.player.z, compact);
-    const portal = this.world.tryEnter(this.player.x, this.player.z, compact);
+    let portal = this.world.tryEnter(this.player.x, this.player.z, compact);
+    if (!contained && portal.kind === "none") {
+      const rescued = this.world.rescueOutside(this.player.x, this.player.z, compact);
+      if (rescued.kind !== "none") portal = rescued;
+    }
     this.waitingDoor = portal.kind === "waiting";
     this.audio.setPortal(this.waitingDoor);
     if (portal.kind === "waiting") {
       this.status = "The doorway is still deciding what it is.";
     } else if (portal.kind === "entered" && portal.room) {
       this.nudgeThroughDoor();
+      if (!this.world.roomAt(this.player.x, this.player.z)) {
+        this.player.x = portal.room.cx;
+        this.player.z = portal.room.cz;
+      }
+      this.world.currentId = portal.room.id;
       this.entity.grace = 1.8;
       this.onEnter(portal.room);
     } else if (portal.kind === "exit") {

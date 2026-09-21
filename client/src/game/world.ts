@@ -97,12 +97,12 @@ export class World {
         const pos = doorWorldPos(room, door);
         const out = doorOutward(room, door);
         extra.push({
-          minX: pos.x + out.x * 0.42 - 0.6,
-          maxX: pos.x + out.x * 0.42 + 0.6,
+          minX: pos.x + out.x * 0.95 - 0.45,
+          maxX: pos.x + out.x * 0.95 + 0.45,
           minY: 0,
           maxY: 2.4,
-          minZ: pos.z + out.z * 0.42 - 0.6,
-          maxZ: pos.z + out.z * 0.42 + 0.6,
+          minZ: pos.z + out.z * 0.95 - 0.45,
+          maxZ: pos.z + out.z * 0.95 + 0.45,
         });
       }
     }
@@ -249,7 +249,7 @@ export class World {
           (door.glitch.material as THREE.MeshBasicMaterial).opacity = 0.08 + Math.abs(Math.sin(time * 41 + 1.2)) * 0.35;
           door.glitch.position.y = 1.07 + Math.sin(time * 22) * 0.05;
         } else if (readyFresh) {
-          (door.shimmer.material as THREE.MeshBasicMaterial).opacity = 0.08 + Math.abs(Math.sin(time * 6)) * 0.08;
+          (door.shimmer.material as THREE.MeshBasicMaterial).opacity = 0.03 + Math.abs(Math.sin(time * 6)) * 0.03;
         }
       }
     }
@@ -283,17 +283,17 @@ export class World {
     const global = this.nearestDoor(px, pz);
     const local = this.nearestDoorIn(this.current, px, pz);
     const hit =
-      local && local.dist <= 1.15 && (!global || local.dist <= global.dist + 0.35)
+      local && local.dist <= 1.35 && (!global || local.dist <= global.dist + 0.35)
         ? { room: this.current, door: local.door, dist: local.dist }
         : global;
-    if (!hit || hit.dist > 1.15) return { kind: "none" };
+    if (!hit || hit.dist > 1.35) return { kind: "none" };
     const { room, door } = hit;
     const out = doorOutward(room, door);
     const pos = doorWorldPos(room, door);
     const side = (px - pos.x) * out.x + (pz - pos.z) * out.z;
-    // Allow crossing from just inside the jamb. The old 0.08 outward-only
-    // check required walking through a still-sealed portal to start generation.
-    if (side < -0.55) return { kind: "none" };
+    // Near a doorway is enough. Requiring the player to step through the
+    // shimmer/seal made ready fallback doors look painted shut (DEPTH stuck at 1).
+    if (side < -1.25) return { kind: "none" };
 
     if (door.fake || door.isFalseExit) return { kind: "fake" };
 
@@ -343,6 +343,31 @@ export class World {
       this.prefetch(room, door, compact);
     }
     return { kind: "waiting", waiting: true };
+  }
+
+  /** If the player walked through a ready jamb into the void, still spawn. */
+  rescueOutside(px: number, pz: number, compact: CompactGameState): {
+    kind: "none" | "entered" | "waiting";
+    room?: BuiltRoom;
+  } {
+    const hit = this.nearestDoor(px, pz);
+    if (!hit || hit.dist > 2.4) return { kind: "none" };
+    const { room, door } = hit;
+    if (door.fake || door.isFalseExit || door.isExit || door.locked) return { kind: "none" };
+    if (door.connectedRoomId) {
+      this.currentId = door.connectedRoomId;
+      return { kind: "entered", room: this.rooms.get(door.connectedRoomId) };
+    }
+    if (doorNeedsForcedFallback(door, performance.now(), ROOM_PREFETCH_TIMEOUT_MS) || !door.decision) {
+      this.finishWithFallback(room, door, compact, "Generation timed out — using fallback.");
+    }
+    if (!door.decision) return { kind: "waiting" };
+    try {
+      const spawned = this.spawnFrom(room, door, door.decision, this.lastSource, this.lastLatency);
+      return { kind: "entered", room: spawned ?? undefined };
+    } catch {
+      return { kind: "waiting" };
+    }
   }
 
   private async prefetch(room: BuiltRoom, door: Door, compact: CompactGameState): Promise<void> {
