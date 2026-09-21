@@ -1,0 +1,19 @@
+{
+  "name": "@liminal/client",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 43133"
+  },
+  "dependencies": {
+    "@liminal/shared": "0.1.0",
+    "three": "^0.180.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.180.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0"
+  }

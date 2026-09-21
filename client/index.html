@@ -1,0 +1,98 @@
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Liminal Drift / 阈限漂流</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="view"></canvas>
+      <div id="scanlines" aria-hidden="true"></div>
+      <div id="vignette" aria-hidden="true"></div>
+      <div id="static-overlay" aria-hidden="true"></div>
+      <div id="hurt" aria-hidden="true"></div>
+      <div id="crosshair" aria-hidden="true"></div>
+
+      <section id="title-screen" class="screen">
+        <div class="screen-inner">
+          <p class="eyebrow">LEVEL 0 · FLUORESCENT LIMINAL</p>
+          <h1>Liminal Drift</h1>
+          <h2>阈限漂流</h2>
+          <p class="lede">
+            The next room is not written down. Something in the walls chooses the layout,
+            the lights, and whether you are still alone.
+          </p>
+          <ul class="controls">
+            <li><kbd>W A S D</kbd> walk · <kbd>Shift</kbd> sneak</li>
+            <li><kbd>Mouse</kbd> look · click to lock pointer</li>
+            <li><kbd>F</kbd> flashlight · <kbd>E</kbd> pick up · <kbd>M</kbd> mute</li>
+            <li>Reach depth 14, or open a rare exit. If it catches you, the drift ends.</li>
+          </ul>
+          <div class="actions">
+            <button type="button" id="btn-start" class="primary">Enter the halls</button>
+            <button type="button" id="btn-title-mute" class="ghost">Mute</button>
+          </div>
+          <p id="title-health" class="fineprint">Checking Jev proxy…</p>
+        </div>
+      </section>
+
+      <section id="pause-hint" class="toast hidden">Click to look · Esc releases the mouse</section>
+
+      <div id="hud" class="hidden">
+        <div class="hud-top">
+          <div class="meter">
+            <span>FEAR</span>
+            <div class="bar"><i id="fear-bar"></i></div>
+            <b id="fear-val">0</b>
+          </div>
+          <div class="meter">
+            <span>LAMP</span>
+            <div class="bar lamp"><i id="bat-bar"></i></div>
+            <b id="bat-val">100</b>
+          </div>
+          <div class="pills">
+            <span id="depth-pill">DEPTH 0</span>
+            <span id="key-pill" class="dim">NO CARD</span>
+            <span id="source-pill">FALLBACK</span>
+          </div>
+        </div>
+        <p id="status-line">The hum does not come from the ceiling.</p>
+        <div class="hud-bottom">
+          <span id="jev-line">Jev —</span>
+          <span id="warn-line" class="warn hidden"></span>
+          <button type="button" id="btn-mute" class="ghost mini">Mute</button>
+        </div>
+      </div>
+
+      <section id="over-screen" class="screen hidden">
+        <div class="screen-inner">
+          <p class="eyebrow" id="over-kicker">DRIFT ENDED</p>
+          <h1 id="over-title">It found you</h1>
+          <p id="over-lead" class="lede"></p>
+          <pre id="over-log" class="jev-log"></pre>
+          <div class="actions">
+            <button type="button" id="btn-again" class="primary">Drift again</button>
+          </div>
+        </div>
+      </section>
+
+      <div id="touch-layer" class="hidden">
+        <div id="stick" class="touch-pad"><i id="stick-knob"></i></div>
+        <div class="touch-look" id="look-pad"></div>
+        <div class="touch-btns">
+          <button type="button" id="btn-flash">LAMP</button>
+          <button type="button" id="btn-sneak">SNEAK</button>
+          <button type="button" id="btn-use">USE</button>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

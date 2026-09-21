@@ -1,0 +1,21 @@
+{
+  "name": "liminal-drift",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Liminal Drift / 阈限漂流 — Backrooms horror driven by TypeSafe Jev",
+  "workspaces": [
+    "client",
+    "server",
+    "shared"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n server,client -c cyan,yellow \"npm run dev -w server\" \"npm run dev -w client\"",
+    "dev:client": "npm run dev -w client",
+    "dev:server": "npm run dev -w server",
+    "build": "npm run build -w client",
+    "start": "npm run start -w server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
