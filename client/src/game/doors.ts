@@ -21,3 +21,13 @@ export function doorAwaitingDecision(door: {
 export function doorGenerationTimedOut(pendingSince: number, now: number, timeoutMs: number): boolean {
   return pendingSince > 0 && now - pendingSince > timeoutMs + 80;
 }
+
+/** Hung prefetch: still pending past the budget, so force a sync fallback. */
+export function doorNeedsForcedFallback(door: {
+  connectedRoomId: string | null;
+  generation: DoorGeneration;
+  pendingSince: number;
+}, now: number, timeoutMs: number): boolean {
+  if (door.connectedRoomId) return false;
+  return door.generation === "pending" && doorGenerationTimedOut(door.pendingSince, now, timeoutMs);
+}

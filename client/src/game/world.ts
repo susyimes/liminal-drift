@@ -9,7 +9,7 @@ import {
   type RoomLogEntry,
 } from "@liminal/shared";
 import { requestRoom } from "../api.ts";
-import { doorAwaitingDecision, doorGenerationTimedOut } from "./doors.ts";
+import { doorAwaitingDecision, doorNeedsForcedFallback } from "./doors.ts";
 import {
   aabbsOverlap,
   dist2,
@@ -263,7 +263,7 @@ export class World {
       const dist = Math.hypot(pos.x - px, pos.z - pz);
       if (dist > 7.2) continue;
       if (door.fake || door.locked || door.isFalseExit) continue;
-      if (door.generation === "pending" && doorGenerationTimedOut(door.pendingSince, performance.now(), ROOM_PREFETCH_TIMEOUT_MS)) {
+      if (doorNeedsForcedFallback(door, performance.now(), ROOM_PREFETCH_TIMEOUT_MS)) {
         this.finishWithFallback(here, door, compact, "Generation timed out — using fallback.");
         continue;
       }
@@ -315,7 +315,7 @@ export class World {
       return { kind: "entered", room: this.rooms.get(door.connectedRoomId) };
     }
 
-    if (door.generation === "pending" && doorGenerationTimedOut(door.pendingSince, performance.now(), ROOM_PREFETCH_TIMEOUT_MS)) {
+    if (doorNeedsForcedFallback(door, performance.now(), ROOM_PREFETCH_TIMEOUT_MS)) {
       this.finishWithFallback(room, door, compact, "Generation timed out — using fallback.");
     }
 
@@ -368,8 +368,13 @@ export class World {
       door.decision = result.decision;
       door.generation = "ready";
     } catch {
-      if (door.connectedRoomId) return;
-      this.finishWithFallback(room, door, compact, "Jev proxy unreachable — using fallback generation.");
+      // Always settle in finally — a hung/aborted decide must not leave pending.
+    } finally {
+      if (door.connectedRoomId) {
+        door.generation = "ready";
+      } else if (door.generation !== "ready" || !door.decision) {
+        this.finishWithFallback(room, door, compact, "Jev proxy unreachable — using fallback generation.");
+      }
     }
   }
 
