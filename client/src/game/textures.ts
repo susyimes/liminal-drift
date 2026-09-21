@@ -108,9 +108,9 @@ function carpet(wet: boolean): { map: THREE.CanvasTexture; rough: THREE.CanvasTe
       const n = fbm(x / 60, y / 60, seed);
       const fiber = ((x * 13 + y * 7) % 5) * 3;
       const wetPatch = wet ? Math.max(0, fbm(x / 80, y / 80, 90) - 0.42) : 0;
-      const r = 92 + n * 40 - wetPatch * 50 + fiber;
-      const g = 68 + n * 22 - wetPatch * 18 + fiber * 0.4;
-      const b = 28 + n * 10 - wetPatch * 6;
+      const r = 148 + n * 36 - wetPatch * 28 + fiber;
+      const g = 112 + n * 22 - wetPatch * 10 + fiber * 0.35;
+      const b = 48 + n * 10 - wetPatch * 4;
       const i = (y * 512 + x) * 4;
       img.data[i] = Math.max(0, Math.min(255, r));
       img.data[i + 1] = Math.max(0, Math.min(255, g));

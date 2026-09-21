@@ -135,14 +135,7 @@ body.playing #crosshair {
   display: grid;
   place-items: center;
   padding: 24px;
-  background:
-    linear-gradient(180deg, rgba(8, 6, 3, 0.42), rgba(8, 6, 3, 0.78)),
-    repeating-linear-gradient(
-      90deg,
-      #d4c44a 0 46px,
-      #b89a32 46px 48px,
-      #d4c44a 48px 94px
-    );
+  background: linear-gradient(180deg, rgba(8, 6, 3, 0.22), rgba(8, 6, 3, 0.58));
   overflow: auto;
 }
 

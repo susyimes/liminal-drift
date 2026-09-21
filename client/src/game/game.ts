@@ -82,8 +82,8 @@ export class Game {
 
     this.camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.08, 80);
     this.scene.add(this.camera);
-    this.ambient = new THREE.AmbientLight(0x3a3214, 0.11);
-    this.hemi = new THREE.HemisphereLight(0xf0e08a, 0x1a1408, 0.16);
+    this.ambient = new THREE.AmbientLight(0x4a3c18, 0.16);
+    this.hemi = new THREE.HemisphereLight(0xf0e08a, 0x2a1c0c, 0.22);
     this.scene.add(this.ambient);
     this.scene.add(this.hemi);
 
@@ -227,8 +227,8 @@ export class Game {
       fog.density = density;
       fog.color.setHex(fogColor);
     }
-    this.ambient.intensity = lighting === "harsh" ? 0.14 : lighting === "dead" ? 0.04 : 0.1;
-    this.hemi.intensity = lighting === "harsh" ? 0.2 : 0.14;
+    this.ambient.intensity = lighting === "harsh" ? 0.2 : lighting === "dead" ? 0.06 : 0.15;
+    this.hemi.intensity = lighting === "harsh" ? 0.26 : 0.2;
     this.renderer.toneMappingExposure = 0.8 - this.player.fear * 0.002 - this.hurtFlash * 0.12 + this.enterBeat * 0.12;
 
     document.getElementById("vignette")?.style.setProperty("opacity", String(0.5 + this.player.fear / 180 + prox * 0.25));
