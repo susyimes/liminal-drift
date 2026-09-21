@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { defaultProgress, encounterAllowed, encounterWarrants } from "./director.ts";
+import { defaultProgress, encounterAllowed, encounterWarrants, ensureTraversableDecision, planDoorWalls } from "./director.ts";
 import { fallbackEntityDecision, fallbackRoomDecision, mapEntityDecision, mapRoomDecision } from "./decisions.ts";
 import { buildQuestions } from "./questions.ts";
 import {
@@ -130,6 +130,71 @@ test("unwarranted encounter cards collapse to none", () => {
     { ...fallback, encounterCard: "none" },
   );
   assert.equal(mapped.encounterCard, "none");
+});
+
+test("early fallback rooms always keep a real forward exit", () => {
+  for (let depth = 1; depth <= 6; depth += 1) {
+    for (let i = 0; i < 40; i += 1) {
+      const decision = fallbackRoomDecision(state({ depth, roomsVisited: depth }), `p-${depth}-${i}`);
+      assert.notEqual(decision.roomArchetype, "dead_end");
+      assert.equal(decision.deadEndBait, false);
+      assert.notEqual(decision.exitOrientation, "behind_only");
+      const planned = planDoorWalls("s", decision);
+      const forward = planned.real.filter((wall) => wall !== "s");
+      assert.ok(forward.length >= 1, `depth ${depth} seed ${i} has no forward door`);
+    }
+  }
+});
+
+test("deadEndBait paints at most one throat and keeps a real exit", () => {
+  const sealed = planDoorWalls("s", {
+    roomArchetype: "empty_office",
+    exitCount: "three",
+    exitOrientation: "split",
+    deadEndBait: true,
+  });
+  assert.ok(sealed.real.filter((wall) => wall !== "s").length >= 1);
+  assert.ok(sealed.fake.length <= 1);
+
+  const onlyOne = planDoorWalls("s", {
+    roomArchetype: "long_hall",
+    exitCount: "one",
+    exitOrientation: "ahead",
+    deadEndBait: true,
+  });
+  assert.deepEqual(onlyOne.real.filter((wall) => wall !== "s"), ["n"]);
+  assert.deepEqual(onlyOne.fake, []);
+
+  const behind = planDoorWalls("s", {
+    roomArchetype: "empty_office",
+    exitCount: "one",
+    exitOrientation: "behind_only",
+    deadEndBait: false,
+  });
+  assert.ok(behind.real.includes("n"));
+});
+
+test("ensureTraversableDecision strips early dead-ends from Jev answers", () => {
+  const s = state({ depth: 1, roomsVisited: 1 });
+  const fallback = fallbackRoomDecision(s, "p3");
+  const mapped = mapRoomDecision(
+    {
+      room_archetype: { type: "choice", choice: "dead_end" },
+      dead_end_bait: { type: "noul", noul: 0.95 },
+      exit_orientation: { type: "choice", choice: "behind_only" },
+    },
+    s,
+    fallback,
+  );
+  assert.notEqual(mapped.roomArchetype, "dead_end");
+  assert.equal(mapped.deadEndBait, false);
+  const planned = planDoorWalls("s", mapped);
+  assert.ok(planned.real.some((wall) => wall !== "s"));
+  const late = ensureTraversableDecision(
+    { ...mapped, roomArchetype: "dead_end", deadEndBait: true, exitOrientation: "behind_only" },
+    10,
+  );
+  assert.equal(late.roomArchetype, "dead_end");
 });
 
 test("entity fallback and mapping include cutoff + bait", () => {

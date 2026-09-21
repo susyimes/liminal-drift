@@ -1,4 +1,4 @@
-import { encounterAllowed, encounterWarrants, readProgress } from "./director.ts";
+import { encounterAllowed, encounterWarrants, ensureTraversableDecision, readProgress } from "./director.ts";
 import { hashString, mulberry32, pickOne, pickWeighted } from "./rng.ts";
 import {
   AMBIENCES,
@@ -131,31 +131,34 @@ export function mapRoomDecision(
   const deadEndBaitNoul = baitNoul ?? fallback.deadEndBaitNoul;
   const deadEndBait = roomArchetype !== "exit_foyer" && deadEndBaitNoul >= 0.55;
 
-  return {
-    roomArchetype,
-    size: isOneOf(sizeRaw, ROOM_SIZES) ? sizeRaw : fallback.size,
-    lighting: isOneOf(lightingRaw, LIGHTING_MODES) ? lightingRaw : fallback.lighting,
-    hazard: isOneOf(hazardRaw, HAZARDS) ? hazardRaw : fallback.hazard,
-    loot,
-    entityPresent,
-    entityPresentNoul,
-    entityBehavior,
-    ambience: isOneOf(ambienceRaw, AMBIENCES) ? ambienceRaw : fallback.ambience,
-    fearIntensity: fear ?? fallback.fearIntensity,
-    layoutMotif: isOneOf(motifRaw, LAYOUT_MOTIFS) ? motifRaw : fallback.layoutMotif,
-    exitCount,
-    exitOrientation,
-    deadEndBait,
-    deadEndBaitNoul,
-    clueBeat,
-    advancesExit: (exitNoul ?? fallback.advancesExitNoul) >= 0.55,
-    advancesExitNoul: exitNoul ?? fallback.advancesExitNoul,
-    encounterCard,
-    cutoffDoor: isOneOf(cutoffRaw, CUTOFF_DOORS) ? cutoffRaw : fallback.cutoffDoor,
-    soundBait: (soundNoul ?? fallback.soundBaitNoul) >= 0.55,
-    soundBaitNoul: soundNoul ?? fallback.soundBaitNoul,
-    entityAggression: aggression ?? fallback.entityAggression,
-  };
+  return ensureTraversableDecision(
+    {
+      roomArchetype,
+      size: isOneOf(sizeRaw, ROOM_SIZES) ? sizeRaw : fallback.size,
+      lighting: isOneOf(lightingRaw, LIGHTING_MODES) ? lightingRaw : fallback.lighting,
+      hazard: isOneOf(hazardRaw, HAZARDS) ? hazardRaw : fallback.hazard,
+      loot,
+      entityPresent,
+      entityPresentNoul,
+      entityBehavior,
+      ambience: isOneOf(ambienceRaw, AMBIENCES) ? ambienceRaw : fallback.ambience,
+      fearIntensity: fear ?? fallback.fearIntensity,
+      layoutMotif: isOneOf(motifRaw, LAYOUT_MOTIFS) ? motifRaw : fallback.layoutMotif,
+      exitCount,
+      exitOrientation,
+      deadEndBait,
+      deadEndBaitNoul,
+      clueBeat,
+      advancesExit: (exitNoul ?? fallback.advancesExitNoul) >= 0.55,
+      advancesExitNoul: exitNoul ?? fallback.advancesExitNoul,
+      encounterCard,
+      cutoffDoor: isOneOf(cutoffRaw, CUTOFF_DOORS) ? cutoffRaw : fallback.cutoffDoor,
+      soundBait: (soundNoul ?? fallback.soundBaitNoul) >= 0.55,
+      soundBaitNoul: soundNoul ?? fallback.soundBaitNoul,
+      entityAggression: aggression ?? fallback.entityAggression,
+    },
+    state.depth,
+  );
 }
 
 export function mapEntityDecision(
@@ -199,7 +202,7 @@ export function fallbackRoomDecision(state: CompactGameState, portalId: string):
     { value: "flooded_lobby", w: recent.has("flooded_lobby") ? 0.3 : 1.1 },
     { value: "maze_cubicles", w: recent.has("maze_cubicles") ? 0.35 : 1.7 },
     { value: "stairwell", w: recent.has("stairwell") ? 0.25 : 1.0 },
-    { value: "dead_end", w: state.depth < 2 ? 0.1 : 0.9 },
+    { value: "dead_end", w: state.depth < 8 ? 0.04 : 0.45 },
     { value: "exit_foyer", w: exitWeight },
   ]);
 
@@ -256,7 +259,7 @@ export function fallbackRoomDecision(state: CompactGameState, portalId: string):
     warrants.map((value) => ({ value, w: value === "none" ? 2.8 : 0.7 })),
   );
 
-  const deadEndBaitNoul = state.depth >= 3 && rng() < 0.22 ? 0.7 : rng() * 0.4;
+  const deadEndBaitNoul = state.depth >= 8 && rng() < 0.12 ? 0.7 : rng() * 0.35;
   const advancesExitNoul = state.depth >= 5 && rng() < 0.28 ? 0.66 : rng() * 0.4;
   const soundBaitNoul = entityBehavior !== "absent" && rng() < 0.35 ? 0.7 : rng() * 0.3;
 
@@ -271,9 +274,12 @@ export function fallbackRoomDecision(state: CompactGameState, portalId: string):
   } else if (archetype === "exit_foyer") {
     exitCount = "one";
     exitOrientation = "ahead";
+  } else if (exitOrientation === "behind_only" && state.depth < 8) {
+    exitOrientation = "ahead";
+    if (exitCount === "one") exitCount = "two";
   }
 
-  return {
+  return ensureTraversableDecision({
     roomArchetype: archetype,
     size: pickOne(rng, sizePool),
     lighting,
@@ -297,7 +303,7 @@ export function fallbackRoomDecision(state: CompactGameState, portalId: string):
     soundBait: soundBaitNoul >= 0.55,
     soundBaitNoul,
     entityAggression: 0.4 + state.depth * 0.08 + (state.player.noise > 0.45 ? 0.5 : 0),
-  };
+  }, state.depth);
 }
 
 export function fallbackEntityDecision(state: CompactGameState): EntityDecision {

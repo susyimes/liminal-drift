@@ -4,8 +4,7 @@ import {
   hashString,
   mulberry32,
   notesFor,
-  orientationWalls,
-  outgoingCount,
+  planDoorWalls,
   type RoomArchetype,
   type RoomDecision,
 } from "@liminal/shared";
@@ -235,21 +234,7 @@ export function roomWorldBounds(cx: number, cz: number, w: number, d: number, ya
 }
 
 function planDoors(entryLocal: Wall, decision: RoomDecision): { real: Wall[]; fake: Wall[] } {
-  const archetype = decision.roomArchetype;
-  if (archetype === "exit_foyer") {
-    const ahead = opposite(entryLocal);
-    return { real: [entryLocal, ahead], fake: [] };
-  }
-  if (archetype === "dead_end") {
-    const baitWalls = decision.deadEndBait ? orientationWalls(entryLocal, "ahead").slice(0, 1) : [];
-    return { real: [entryLocal], fake: baitWalls };
-  }
-  const outgoing = Math.min(archetype === "stairwell" ? 2 : 4, outgoingCount(decision.exitCount));
-  const wanted = orientationWalls(entryLocal, decision.exitOrientation).slice(0, outgoing);
-  if (decision.deadEndBait) {
-    return { real: [entryLocal], fake: wanted.slice(0, Math.max(1, wanted.length)) };
-  }
-  return { real: [entryLocal, ...wanted], fake: [] };
+  return planDoorWalls(entryLocal, decision);
 }
 
 function makeDoorVisuals(

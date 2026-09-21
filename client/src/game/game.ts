@@ -218,7 +218,11 @@ export class Game {
 
     const compact = this.compactState();
     void this.world.considerPrefetch(this.player.x, this.player.z, compact);
-    const portal = this.world.tryEnter(this.player.x, this.player.z, compact);
+    let portal = this.world.tryEnter(this.player.x, this.player.z, compact);
+    if (!contained && portal.kind === "none") {
+      const rescued = this.world.rescueOutside(this.player.x, this.player.z, compact);
+      if (rescued.kind !== "none") portal = rescued;
+    }
     this.waitingDoor = portal.kind === "waiting";
     this.audio.setPortal(this.waitingDoor);
     if (portal.kind === "waiting") {
