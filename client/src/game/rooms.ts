@@ -137,6 +137,22 @@ const mats = {
   trim: std({ color: 0x6b5420, roughness: 0.75 }),
   bars: std({ color: 0x2a2c28, roughness: 0.35, metalness: 0.7 }),
   alcove: std({ color: 0xc4b24a, map: tex.wall, roughness: 0.86 }),
+  tile: std({ color: 0xd4ecec, map: tex.tileWall, roughness: 0.32, metalness: 0.08 }),
+  tileFloor: std({
+    color: 0xb8e0e4,
+    map: tex.tileFloor,
+    roughnessMap: tex.tileFloorRough,
+    roughness: 0.14,
+    metalness: 0.2,
+  }),
+  pool: std({
+    color: 0x1f6f7c,
+    map: tex.poolWater,
+    transparent: true,
+    opacity: 0.52,
+    roughness: 0.08,
+    metalness: 0.28,
+  }),
 };
 
 export function sizeOf(archetype: RoomArchetype, size: RoomDecision["size"]): { w: number; d: number } {
@@ -148,6 +164,7 @@ export function sizeOf(archetype: RoomArchetype, size: RoomDecision["size"]): { 
     stairwell: { w: 8.2, d: 8.2 },
     dead_end: { w: 6.4, d: 6.4 },
     exit_foyer: { w: 9, d: 10 },
+    poolcore: { w: 15, d: 18 },
   };
   const raw = base[archetype];
   const mul = size === "cramped" ? 0.78 : size === "vast" ? 1.28 : 1;
@@ -160,6 +177,7 @@ function wallMaterial(archetype: RoomArchetype): THREE.MeshStandardMaterial {
   if (archetype === "exit_foyer") return mats.wallExit;
   if (archetype === "stairwell") return mats.wallConcrete;
   if (archetype === "flooded_lobby") return mats.wallDamp;
+  if (archetype === "poolcore") return mats.tile;
   return mats.wall;
 }
 
@@ -348,10 +366,12 @@ function addLight(
 ): void {
   addBox(group, mats.metal, x, HEIGHT - 0.04, z, 1.7, 0.08, 0.38);
   const live = decision.lighting !== "dead";
+  const poolVibe = decision.roomArchetype === "poolcore" || decision.lightingMood === "humid_teal";
+  const emissive = poolVibe ? 0xa8fff4 : decision.lightingMood === "cold_service" ? 0xdce8f4 : decision.lightingMood === "brownout" ? 0xe0b86a : 0xfff1b0;
   const tubeMat = live
     ? new THREE.MeshStandardMaterial({
-        color: 0xfff6d0,
-        emissive: 0xfff1b0,
+        color: poolVibe ? 0xd8fff8 : 0xfff6d0,
+        emissive,
         emissiveIntensity: 1.4,
         roughness: 0.25,
         metalness: 0.1,
@@ -359,7 +379,7 @@ function addLight(
     : mats.lightDead;
   const tube = addBox(group, tubeMat, x, HEIGHT - 0.1, z, 1.45, 0.04, 0.16);
   if (live) {
-    const light = new THREE.PointLight(0xfff1b0, intensity, 14, 1.45);
+    const light = new THREE.PointLight(emissive, intensity, 14, 1.45);
     light.position.set(x, HEIGHT - 0.32, z);
     group.add(light);
     lights.push({ light, base: intensity, phase: hashString(`${x}:${z}`) % 100, tube });
@@ -521,6 +541,38 @@ function decorate(
     addBox(group, mats.metal, 0, 1.15, d / 2 - 0.28, 1.5, 2.2, 0.12);
   }
 
+  if (archetype === "poolcore") {
+    const basinW = Math.min(w * 0.52, 8.2);
+    const basinD = Math.min(d * 0.48, 9.4);
+    addBox(group, mats.tile, 0, 0.22, 0, basinW + 0.55, 0.44, basinD + 0.55);
+    addBox(group, mats.dark, 0, -0.15, 0, basinW, 0.2, basinD);
+    const filled = decision.encounterCard === "flooded_slow_zone" || rng() < 0.55;
+    const pool = new THREE.Mesh(new THREE.PlaneGeometry(basinW - 0.25, basinD - 0.25), mats.pool);
+    pool.rotation.x = -Math.PI / 2;
+    pool.position.y = filled ? 0.18 : 0.02;
+    group.add(pool);
+    for (const side of [-1, 1]) {
+      addBox(group, mats.metal, side * (basinW / 2 - 0.15), 0.85, -basinD / 2 + 0.2, 0.06, 1.5, 0.06);
+      addBox(group, mats.metal, side * (basinW / 2 - 0.15), 0.18, -basinD / 2 + 0.55, 0.08, 0.08, 0.7);
+    }
+    addBox(group, mats.tile, -w * 0.32, 1.2, d * 0.28, 0.42, 2.4, 0.42);
+    addBox(group, mats.tile, w * 0.3, 1.2, -d * 0.22, 0.42, 2.4, 0.42);
+    colliders.push(aabbFromCenter(-w * 0.32, 1.2, d * 0.28, 0.24, 1.2, 0.24));
+    colliders.push(aabbFromCenter(w * 0.3, 1.2, -d * 0.22, 0.24, 1.2, 0.24));
+    const haze = new THREE.Mesh(
+      new THREE.PlaneGeometry(w * 0.9, 1.6),
+      new THREE.MeshBasicMaterial({
+        color: 0x8ef0ea,
+        transparent: true,
+        opacity: 0.045,
+        depthWrite: false,
+      }),
+    );
+    haze.position.set(0, 1.4, 0);
+    haze.rotation.x = -0.12;
+    group.add(haze);
+  }
+
   if (decision.clueBeat === "graffiti") {
     const text = graffitiFor(seed);
     const gtex = makeGraffitiTexture(text);
@@ -572,8 +624,12 @@ export function buildRoom(options: {
   group.rotation.y = yaw;
 
   const wet =
-    archetype === "flooded_lobby" || decision.hazard === "puddle_slip" || decision.encounterCard === "flooded_slow_zone";
-  const floorMat = wet ? mats.carpetWet.clone() : mats.carpet.clone();
+    archetype === "flooded_lobby" ||
+    archetype === "poolcore" ||
+    decision.hazard === "puddle_slip" ||
+    decision.encounterCard === "flooded_slow_zone";
+  const floorMat =
+    archetype === "poolcore" ? mats.tileFloor.clone() : wet ? mats.carpetWet.clone() : mats.carpet.clone();
   if (floorMat.map) floorMat.map = tiled(floorMat.map, w / 3.2, d / 3.2);
   if (floorMat.roughnessMap) floorMat.roughnessMap = tiled(floorMat.roughnessMap, w / 3.2, d / 3.2);
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(w, d), floorMat);
@@ -672,6 +728,11 @@ export function buildRoom(options: {
     for (let z = -d / 2 + 2; z < d / 2; z += 3.6) addLight(group, lights, 0, z, 18 * Math.max(dimMul, 0.05), decision);
   } else if (archetype === "dead_end") {
     addLight(group, lights, 0, 0, 12 * Math.max(dimMul, 0.05), decision);
+  } else if (archetype === "poolcore") {
+    addLight(group, lights, -w * 0.28, -d * 0.28, 17 * Math.max(dimMul, 0.08), decision);
+    addLight(group, lights, w * 0.26, d * 0.22, 16 * Math.max(dimMul, 0.08), decision);
+    addLight(group, lights, 0, 0, 14 * Math.max(dimMul, 0.08), decision);
+    addLight(group, lights, w * 0.2, -d * 0.3, 13 * Math.max(dimMul, 0.08), decision);
   } else {
     addLight(group, lights, -w * 0.22, -d * 0.2, 16 * Math.max(dimMul, 0.05), decision);
     addLight(group, lights, w * 0.2, d * 0.18, 15 * Math.max(dimMul, 0.05), decision);
@@ -752,6 +813,7 @@ export function placeAgainstDoor(
   parent: BuiltRoom,
   parentDoor: Door,
   decision: RoomDecision,
+  extraGap = 0,
 ): { cx: number; cz: number; yawTurns: number; entryWorldWall: Wall } {
   const out = doorOutward(parent, parentDoor);
   const neededEntryWorld = opposite(parentDoor.worldWall);
@@ -760,9 +822,10 @@ export function placeAgainstDoor(
   const { d } = sizeOf(decision.roomArchetype, decision.size);
   const half = d / 2;
   const parentPos = doorWorldPos(parent, parentDoor);
+  const gap = extraGap + 0.02;
   return {
-    cx: parentPos.x + out.x * (half + 0.02),
-    cz: parentPos.z + out.z * (half + 0.02),
+    cx: parentPos.x + out.x * (half + gap),
+    cz: parentPos.z + out.z * (half + gap),
     yawTurns,
     entryWorldWall: neededEntryWorld,
   };
@@ -773,6 +836,7 @@ export function startRoomDecision(): RoomDecision {
     roomArchetype: "empty_office",
     size: "standard",
     lighting: "flickering",
+    lightingMood: "sick_yellow",
     hazard: "none",
     loot: "battery",
     entityPresent: false,
@@ -793,5 +857,8 @@ export function startRoomDecision(): RoomDecision {
     soundBait: false,
     soundBaitNoul: 0.04,
     entityAggression: 0.2,
+    entityPressure: 0.25,
+    tunnelLength: "short",
+    tunnelMood: "yellow_throat",
   };
 }

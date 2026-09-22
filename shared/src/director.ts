@@ -129,6 +129,20 @@ export function orientationWalls(entry: WallLike, orientation: ExitOrientation):
   return [left, right, ahead];
 }
 
+/** Extra real mouths so "two exits" is never just a single ahead jamb. */
+export function fillOutgoingWalls(entry: WallLike, wanted: WallLike[], outgoing: number): WallLike[] {
+  if (outgoing <= 0) return [];
+  const ahead = oppositeWall(entry);
+  const left = rotateWallLike(entry, 1);
+  const right = rotateWallLike(entry, -1);
+  const filled = [...wanted];
+  for (const wall of [ahead, left, right]) {
+    if (filled.length >= outgoing) break;
+    if (!filled.includes(wall)) filled.push(wall);
+  }
+  return filled.slice(0, outgoing);
+}
+
 /** True dead-ends stay rare until the run is almost over. */
 export function allowIntentionalDeadEnd(depth: number): boolean {
   return depth >= WIN_DEPTH - 6;
@@ -148,7 +162,11 @@ export function planDoorWalls(
   }
 
   const outgoing = Math.min(archetype === "stairwell" ? 2 : 4, outgoingCount(decision.exitCount));
-  let wanted = orientationWalls(entryLocal, decision.exitOrientation).slice(0, outgoing);
+  let wanted = fillOutgoingWalls(
+    entryLocal,
+    orientationWalls(entryLocal, decision.exitOrientation),
+    outgoing,
+  );
   if (wanted.length === 0) wanted = [oppositeWall(entryLocal)];
 
   // Bait may paint one throat. It must never delete the last real forward door.
@@ -180,6 +198,15 @@ export function ensureTraversableDecision(decision: RoomDecision, depth: number)
     next.deadEndBait = false;
     next.exitOrientation = "ahead";
     next.exitCount = "one";
+  }
+  // Most chambers should branch. A single outgoing door feels like a portal swap.
+  if (
+    next.roomArchetype !== "dead_end" &&
+    next.roomArchetype !== "exit_foyer" &&
+    next.exitCount === "one"
+  ) {
+    next.exitCount = "two";
+    if (next.exitOrientation === "behind_only") next.exitOrientation = "ahead";
   }
   return next;
 }

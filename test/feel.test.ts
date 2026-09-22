@@ -17,6 +17,7 @@ test("HUD progress names DEPTH and the room vibe in Chinese", () => {
   assert.equal(roomVibeZh("stairwell"), "楼梯间");
   assert.equal(roomVibeHud("maze_cubicles"), "隔间迷宫 · maze_cubicles");
   assert.equal(roomVibeHud("long_hall"), "长廊 · long_hall");
+  assert.equal(roomVibeHud("poolcore"), "池核 · poolcore");
   assert.ok(OPENING_HINT.includes("门"));
 });
 

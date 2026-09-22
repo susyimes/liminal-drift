@@ -168,6 +168,90 @@ function ceilingTiles(): THREE.CanvasTexture {
   return toTexture(c, 2);
 }
 
+function tileWall(): THREE.CanvasTexture {
+  const { c, ctx } = canvas(512);
+  ctx.fillStyle = "#d8ecec";
+  ctx.fillRect(0, 0, 512, 512);
+  const grout = 3;
+  ctx.fillStyle = "#7aa0a4";
+  for (let i = 0; i <= 512; i += 64) {
+    ctx.fillRect(i - grout / 2, 0, grout, 512);
+    ctx.fillRect(0, i - grout / 2, 512, grout);
+  }
+  const img = ctx.getImageData(0, 0, 512, 512);
+  for (let y = 0; y < 512; y += 1) {
+    for (let x = 0; x < 512; x += 1) {
+      const i = (y * 512 + x) * 4;
+      const stain = Math.max(0, fbm(x / 90, y / 70, 61) - 0.62) * 40;
+      const grit = (hash(x, y, 61) - 0.5) * 10;
+      img.data[i] = Math.max(0, Math.min(255, (img.data[i] ?? 200) - stain * 0.4 + grit));
+      img.data[i + 1] = Math.max(0, Math.min(255, (img.data[i + 1] ?? 220) - stain * 0.1 + grit));
+      img.data[i + 2] = Math.max(0, Math.min(255, (img.data[i + 2] ?? 220) + stain * 0.15 + grit));
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  ctx.fillStyle = "rgba(30, 80, 90, 0.12)";
+  ctx.beginPath();
+  ctx.ellipse(180, 220, 90, 36, 0.3, 0, Math.PI * 2);
+  ctx.fill();
+  return toTexture(c, 3);
+}
+
+function tileFloor(): { map: THREE.CanvasTexture; rough: THREE.CanvasTexture } {
+  const { c, ctx } = canvas(512);
+  ctx.fillStyle = "#c5e4e6";
+  ctx.fillRect(0, 0, 512, 512);
+  ctx.fillStyle = "#5e888c";
+  for (let i = 0; i <= 512; i += 48) {
+    ctx.fillRect(i - 1, 0, 2, 512);
+    ctx.fillRect(0, i - 1, 512, 2);
+  }
+  const img = ctx.getImageData(0, 0, 512, 512);
+  for (let y = 0; y < 512; y += 1) {
+    for (let x = 0; x < 512; x += 1) {
+      const wet = Math.max(0, fbm(x / 50, y / 50, 77) - 0.4);
+      const i = (y * 512 + x) * 4;
+      img.data[i] = Math.max(0, Math.min(255, (img.data[i] ?? 180) - wet * 20));
+      img.data[i + 1] = Math.max(0, Math.min(255, (img.data[i + 1] ?? 210) + wet * 8));
+      img.data[i + 2] = Math.max(0, Math.min(255, (img.data[i + 2] ?? 210) + wet * 16));
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const map = toTexture(c, 4);
+
+  const roughCanvas = canvas(256);
+  const rimg = roughCanvas.ctx.createImageData(256, 256);
+  for (let y = 0; y < 256; y += 1) {
+    for (let x = 0; x < 256; x += 1) {
+      const wet = Math.max(0, fbm(x / 28, y / 28, 77) - 0.38);
+      const v = 40 + wet * 90;
+      const i = (y * 256 + x) * 4;
+      rimg.data[i] = rimg.data[i + 1] = rimg.data[i + 2] = Math.max(0, Math.min(255, v));
+      rimg.data[i + 3] = 255;
+    }
+  }
+  roughCanvas.ctx.putImageData(rimg, 0, 0);
+  return { map, rough: toTexture(roughCanvas.c, 4, false) };
+}
+
+function poolWater(): THREE.CanvasTexture {
+  const { c, ctx } = canvas(256);
+  const img = ctx.createImageData(256, 256);
+  for (let y = 0; y < 256; y += 1) {
+    for (let x = 0; x < 256; x += 1) {
+      const n = fbm(x / 22, y / 22, 33);
+      const lane = Math.abs(((x + 8) % 64) - 32) < 2 ? 18 : 0;
+      const i = (y * 256 + x) * 4;
+      img.data[i] = 28 + n * 22 + lane;
+      img.data[i + 1] = 120 + n * 50;
+      img.data[i + 2] = 140 + n * 55;
+      img.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return toTexture(c, 3);
+}
+
 function water(): THREE.CanvasTexture {
   const { c, ctx } = canvas(256);
   const img = ctx.createImageData(256, 256);
@@ -226,12 +310,18 @@ const carpetDry = carpet(false);
 const carpetWet = carpet(true);
 const ceilMap = ceilingTiles();
 const waterMap = water();
+const tileWallMap = tileWall();
+const tileFloorMaps = tileFloor();
+const poolWaterMap = poolWater();
 
 export const tex = {
   wall: wallMap,
   wallDamp: wallDampMap,
   wallExit: wallExitMap,
   concrete: concreteMap,
+  tileWall: tileWallMap,
+  tileFloor: tileFloorMaps.map,
+  tileFloorRough: tileFloorMaps.rough,
   wallNorm,
   carpet: carpetDry.map,
   carpetRough: carpetDry.rough,
@@ -239,6 +329,7 @@ export const tex = {
   carpetWetRough: carpetWet.rough,
   ceiling: ceilMap,
   water: waterMap,
+  poolWater: poolWaterMap,
   cone: coneGradient(),
 };
 

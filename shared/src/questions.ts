@@ -32,7 +32,7 @@ export function buildRoomQuestions(state: CompactGameState): JevQuestions {
   const questions: JevQuestions = {
     room_archetype: {
       type: "choice",
-      instructions: `Director: pick the next Backrooms chamber. ${snap}. Avoid repeating the last two of [${recent}]. exit_foyer stays rare unless exitChance is high and depth>=7. dead_end is a sudden stop, not a joke. Prefer long_hall / maze_cubicles often enough that the building feels endless.`,
+      instructions: `Director: pick the next Backrooms chamber. ${snap}. Avoid repeating the last two of [${recent}]. exit_foyer stays rare unless exitChance is high and depth>=7. dead_end is a sudden stop, not a joke. Prefer long_hall / maze_cubicles / poolcore often enough that the building feels endless and wet, not a single portal. Mix poolcore (池核) as a real Level-adjacent vibe, not a one-off.`,
       criteria: {
         empty_office: "Yellow office, wet carpet, a few tired desks",
         long_hall: "Fluorescent corridor that lasts too long",
@@ -41,6 +41,7 @@ export function buildRoomQuestions(state: CompactGameState): JevQuestions {
         stairwell: "Concrete landing that does not connect correctly",
         dead_end: "Small stained room; only the way you came is real",
         exit_foyer: "Rare cooler foyer with a possible exit — almost never before depth 8 unless exitChance>0.6",
+        poolcore: "池核 — wet white/cyan tile, empty or flooded basin, humid fluorescent teal, dripping",
       },
     },
     size: {
@@ -83,13 +84,23 @@ export function buildRoomQuestions(state: CompactGameState): JevQuestions {
         narrow_throat: "A choke just after the door, then a wider gut",
       },
     },
+    lighting_mood: {
+      type: "choice",
+      instructions: `Color grade of the fixtures (separate from flicker/dim). Current mood=${state.currentRoom?.lightingMood ?? "sick_yellow"}, here=${state.currentRoom?.archetype ?? "void"}. poolcore should usually be humid_teal. yellow offices stay sick_yellow. Do not brownout every late room.`,
+      criteria: {
+        sick_yellow: "Classic Level-0 bile fluorescent",
+        humid_teal: "Cool cyan/teal poolcore wet light",
+        cold_service: "White-blue service corridor, no comfort",
+        brownout: "Undervolt amber, almost dying",
+      },
+    },
     exit_count: {
       type: "choice",
-      instructions: `How many REAL outgoing passages besides the entry? Depth ${state.depth}. One keeps the graph linear. Four is rare and should feel wrong. dead_end archetype should be one. Do not open a maze of doors every time.`,
+      instructions: `How many REAL outgoing passages besides the entry? Depth ${state.depth}. Prefer two or three so the graph is Backrooms (junctions, return paths), not one-door teleports. One is for dead_end / a rare choke. Four is rare and should feel wrong.`,
       criteria: {
-        one: "A single real way onward",
-        two: "A binary choice",
-        three: "A small junction",
+        one: "A single real way onward — use sparingly",
+        two: "A binary choice / hall with a side throat",
+        three: "A small junction — default Backrooms feel",
         four: "Every wall offers a mouth — use sparingly",
       },
     },
@@ -211,6 +222,35 @@ export function buildRoomQuestions(state: CompactGameState): JevQuestions {
         "The space wants them gone",
         "Breaking — sensory collapse",
       ],
+    },
+    entity_pressure: {
+      type: "score",
+      instructions: `How hunted should THIS space feel, even before the body is seen? ${snap}. Higher after quietRooms>=3, if noisy, or if known and hops<=2. Lower in the first rooms. Stacks with entity_present but does not force a spawn.`,
+      criteria: [
+        "Empty pressure; the building is the threat",
+        "Watched, but maybe just pipes",
+        "Something is using the doors",
+        "It is already in the graph with them",
+      ],
+    },
+    tunnel_length: {
+      type: "choice",
+      instructions: `The wanderer walks a first-person throat/corridor BEFORE the next chamber resolves. Depth ${state.depth}. Short is a jamb that still feels like travel. Long is a service hall. Medium is the default Backrooms connector. Longer gives Jev more time to decide the destination.`,
+      criteria: {
+        short: "A brief tiled throat — still travel, not a cut",
+        medium: "A real connecting corridor",
+        long: "A service hall that lasts a few breaths",
+      },
+    },
+    tunnel_mood: {
+      type: "choice",
+      instructions: `What is that connecting throat made of? From=${state.currentRoom?.archetype ?? "void"} / mood=${state.currentRoom?.lightingMood ?? "?"}. poolcore destinations or flooded rooms should prefer pool_pipe or damp_service. yellow_throat is Level-0 wallpaper. dark_throat is underlit concrete.`,
+      criteria: {
+        yellow_throat: "Yellow wallpaper, stained carpet, 60Hz",
+        damp_service: "Peeling service hall, wet concrete",
+        pool_pipe: "Cyan tile pipe / poolcore connector",
+        dark_throat: "Almost unlit throat; lamp is the key",
+      },
     },
   };
 

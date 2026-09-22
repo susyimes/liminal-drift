@@ -12,6 +12,10 @@ import {
   EXIT_COUNTS,
   JEV_MODEL,
   LAYOUT_MOTIFS,
+  LIGHTING_MOODS,
+  ROOM_ARCHETYPES,
+  TUNNEL_LENGTHS,
+  TUNNEL_MOODS,
   type CompactGameState,
 } from "./types.ts";
 
@@ -68,6 +72,11 @@ test("room questions are a fat systemone set and encounter is optional", () => {
   assert.ok(early.layout_motif);
   assert.ok(early.fear_intensity);
   assert.ok(early.advances_exit);
+  assert.ok(early.lighting_mood);
+  assert.ok(early.entity_pressure);
+  assert.ok(early.tunnel_length);
+  assert.ok(early.tunnel_mood);
+  assert.ok("poolcore" in (early.room_archetype.criteria ?? {}));
   assert.equal(early.encounter_card, undefined);
 
   const late = buildQuestions(state({ depth: 8, roomsVisited: 8, player: { sanity: 70, battery: 20, hasKeycard: false, noise: 0.6, moving: true } }));
@@ -84,6 +93,10 @@ test("fallback rooms fill every director field with legal enums", () => {
   assert.ok(CLUE_BEATS.includes(decision.clueBeat));
   assert.ok(ENTITY_BEHAVIORS.includes(decision.entityBehavior));
   assert.ok(CUTOFF_DOORS.includes(decision.cutoffDoor));
+  assert.ok(LIGHTING_MOODS.includes(decision.lightingMood));
+  assert.ok(TUNNEL_LENGTHS.includes(decision.tunnelLength));
+  assert.ok(TUNNEL_MOODS.includes(decision.tunnelMood));
+  assert.equal(typeof decision.entityPressure, "number");
   assert.ok(encounterAllowed(state(), decision.encounterCard) || decision.encounterCard === "none");
   assert.equal(typeof decision.advancesExit, "boolean");
   assert.equal(typeof decision.deadEndBait, "boolean");
@@ -106,11 +119,19 @@ test("mapRoomDecision uses fallback when answers are empty and applies valid ans
       dead_end_bait: { type: "noul", noul: 0.1 },
       encounter_card: { type: "choice", choice: "safe_alcove" },
       fear_intensity: { type: "score", score: 2.2 },
+      lighting_mood: { type: "choice", choice: "humid_teal" },
+      tunnel_length: { type: "choice", choice: "long" },
+      tunnel_mood: { type: "choice", choice: "pool_pipe" },
+      entity_pressure: { type: "score", score: 2.4 },
     },
     s,
     fallback,
   );
   assert.equal(mapped.roomArchetype, "maze_cubicles");
+  assert.equal(mapped.lightingMood, "humid_teal");
+  assert.equal(mapped.tunnelLength, "long");
+  assert.equal(mapped.tunnelMood, "pool_pipe");
+  assert.equal(mapped.entityPressure, 2.4);
   assert.equal(mapped.layoutMotif, "narrow_throat");
   assert.equal(mapped.clueBeat, "graffiti");
   assert.equal(mapped.entityBehavior, "mimic_door");
@@ -142,8 +163,36 @@ test("early fallback rooms always keep a real forward exit", () => {
       const planned = planDoorWalls("s", decision);
       const forward = planned.real.filter((wall) => wall !== "s");
       assert.ok(forward.length >= 1, `depth ${depth} seed ${i} has no forward door`);
+      assert.ok(forward.length >= 2, `depth ${depth} seed ${i} is still a single-portal room`);
     }
   }
+});
+
+test("poolcore is a legal archetype and fallback can emit it", () => {
+  assert.ok(ROOM_ARCHETYPES.includes("poolcore"));
+  let seen = false;
+  for (let i = 0; i < 80; i += 1) {
+    const decision = fallbackRoomDecision(state({ depth: 5, roomsVisited: 5 }), `pool-${i}`);
+    if (decision.roomArchetype === "poolcore") {
+      seen = true;
+      assert.equal(decision.lightingMood, "humid_teal");
+      assert.equal(decision.tunnelMood, "pool_pipe");
+      break;
+    }
+  }
+  assert.equal(seen, true, "fallback never rolled poolcore in 80 tries");
+});
+
+test("two-exit halls also open a side throat, not only ahead", () => {
+  const planned = planDoorWalls("s", {
+    roomArchetype: "long_hall",
+    exitCount: "two",
+    exitOrientation: "ahead",
+    deadEndBait: false,
+  });
+  const forward = planned.real.filter((wall) => wall !== "s");
+  assert.ok(forward.includes("n"));
+  assert.ok(forward.length >= 2);
 });
 
 test("deadEndBait paints at most one throat and keeps a real exit", () => {

@@ -12,9 +12,12 @@ import {
   HAZARDS,
   LAYOUT_MOTIFS,
   LIGHTING_MODES,
+  LIGHTING_MOODS,
   LOOT_TYPES,
   ROOM_ARCHETYPES,
   ROOM_SIZES,
+  TUNNEL_LENGTHS,
+  TUNNEL_MOODS,
   WIN_DEPTH,
   type ClueBeat,
   type CompactGameState,
@@ -30,10 +33,13 @@ import {
   type JevAnswers,
   type LayoutMotif,
   type LightingMode,
+  type LightingMood,
   type LootType,
   type RoomArchetype,
   type RoomDecision,
   type RoomSize,
+  type TunnelLength,
+  type TunnelMood,
 } from "./types.ts";
 
 function isOneOf<T extends string>(value: unknown, allowed: readonly T[]): value is T {
@@ -78,12 +84,16 @@ export function mapRoomDecision(
   const clueRaw = readChoice(answers, "clue_beat");
   const encounterRaw = readChoice(answers, "encounter_card");
   const cutoffRaw = readChoice(answers, "cutoff_door");
+  const moodRaw = readChoice(answers, "lighting_mood");
+  const tunnelLenRaw = readChoice(answers, "tunnel_length");
+  const tunnelMoodRaw = readChoice(answers, "tunnel_mood");
   const noul = readNoul(answers, "entity_present");
   const baitNoul = readNoul(answers, "dead_end_bait");
   const exitNoul = readNoul(answers, "advances_exit");
   const soundNoul = readNoul(answers, "sound_bait");
   const fear = readScore(answers, "fear_intensity");
   const aggression = readScore(answers, "entity_aggression");
+  const pressure = readScore(answers, "entity_pressure");
 
   let roomArchetype: RoomArchetype = isOneOf(archetypeRaw, ROOM_ARCHETYPES)
     ? archetypeRaw
@@ -131,11 +141,18 @@ export function mapRoomDecision(
   const deadEndBaitNoul = baitNoul ?? fallback.deadEndBaitNoul;
   const deadEndBait = roomArchetype !== "exit_foyer" && deadEndBaitNoul >= 0.55;
 
+  let lightingMood: LightingMood = isOneOf(moodRaw, LIGHTING_MOODS) ? moodRaw : fallback.lightingMood;
+  if (roomArchetype === "poolcore" && lightingMood === "sick_yellow") lightingMood = "humid_teal";
+
+  let tunnelMood: TunnelMood = isOneOf(tunnelMoodRaw, TUNNEL_MOODS) ? tunnelMoodRaw : fallback.tunnelMood;
+  if (roomArchetype === "poolcore" && tunnelMood === "yellow_throat") tunnelMood = "pool_pipe";
+
   return ensureTraversableDecision(
     {
       roomArchetype,
       size: isOneOf(sizeRaw, ROOM_SIZES) ? sizeRaw : fallback.size,
       lighting: isOneOf(lightingRaw, LIGHTING_MODES) ? lightingRaw : fallback.lighting,
+      lightingMood,
       hazard: isOneOf(hazardRaw, HAZARDS) ? hazardRaw : fallback.hazard,
       loot,
       entityPresent,
@@ -156,6 +173,9 @@ export function mapRoomDecision(
       soundBait: (soundNoul ?? fallback.soundBaitNoul) >= 0.55,
       soundBaitNoul: soundNoul ?? fallback.soundBaitNoul,
       entityAggression: aggression ?? fallback.entityAggression,
+      entityPressure: pressure ?? fallback.entityPressure,
+      tunnelLength: isOneOf(tunnelLenRaw, TUNNEL_LENGTHS) ? tunnelLenRaw : fallback.tunnelLength,
+      tunnelMood,
     },
     state.depth,
   );
@@ -197,11 +217,12 @@ export function fallbackRoomDecision(state: CompactGameState, portalId: string):
             : 0;
 
   const archetype = pickWeighted<RoomArchetype>(rng, [
-    { value: "empty_office", w: recent.has("empty_office") ? 0.4 : 1.6 },
-    { value: "long_hall", w: recent.has("long_hall") ? 0.5 : 2.2 },
-    { value: "flooded_lobby", w: recent.has("flooded_lobby") ? 0.3 : 1.1 },
-    { value: "maze_cubicles", w: recent.has("maze_cubicles") ? 0.35 : 1.7 },
-    { value: "stairwell", w: recent.has("stairwell") ? 0.25 : 1.0 },
+    { value: "empty_office", w: recent.has("empty_office") ? 0.4 : 1.5 },
+    { value: "long_hall", w: recent.has("long_hall") ? 0.5 : 2.1 },
+    { value: "flooded_lobby", w: recent.has("flooded_lobby") ? 0.3 : 1.0 },
+    { value: "maze_cubicles", w: recent.has("maze_cubicles") ? 0.35 : 1.6 },
+    { value: "stairwell", w: recent.has("stairwell") ? 0.25 : 0.95 },
+    { value: "poolcore", w: recent.has("poolcore") ? 0.35 : 1.35 },
     { value: "dead_end", w: state.depth < 8 ? 0.04 : 0.45 },
     { value: "exit_foyer", w: exitWeight },
   ]);
@@ -211,7 +232,9 @@ export function fallbackRoomDecision(state: CompactGameState, portalId: string):
       ? ["cramped", "standard"]
       : archetype === "long_hall"
         ? ["standard", "vast"]
-        : [...ROOM_SIZES];
+        : archetype === "poolcore"
+          ? ["standard", "vast"]
+          : [...ROOM_SIZES];
 
   const lighting = pickWeighted<LightingMode>(rng, [
     { value: "flickering", w: 1.4 },
@@ -263,14 +286,28 @@ export function fallbackRoomDecision(state: CompactGameState, portalId: string):
   const advancesExitNoul = state.depth >= 5 && rng() < 0.28 ? 0.66 : rng() * 0.4;
   const soundBaitNoul = entityBehavior !== "absent" && rng() < 0.35 ? 0.7 : rng() * 0.3;
 
-  let exitCount: ExitCount = pickOne(rng, EXIT_COUNTS);
-  let exitOrientation: ExitOrientation = pickOne(rng, EXIT_ORIENTATIONS);
+  let exitCount: ExitCount = pickWeighted<ExitCount>(rng, [
+    { value: "one", w: 0.28 },
+    { value: "two", w: 2.4 },
+    { value: "three", w: 1.7 },
+    { value: "four", w: 0.35 },
+  ]);
+  let exitOrientation: ExitOrientation = pickWeighted<ExitOrientation>(rng, [
+    { value: "ahead", w: 1.2 },
+    { value: "left", w: 0.85 },
+    { value: "right", w: 0.85 },
+    { value: "split", w: 1.6 },
+    { value: "behind_only", w: state.depth >= 8 ? 0.2 : 0.02 },
+  ]);
   if (archetype === "dead_end") {
     exitCount = "one";
     exitOrientation = "behind_only";
   } else if (archetype === "long_hall") {
-    exitCount = rng() < 0.35 ? "two" : "one";
-    exitOrientation = rng() < 0.4 ? "split" : "ahead";
+    exitCount = rng() < 0.45 ? "three" : "two";
+    exitOrientation = rng() < 0.5 ? "split" : "ahead";
+  } else if (archetype === "poolcore" || archetype === "maze_cubicles" || archetype === "empty_office") {
+    exitCount = rng() < 0.4 ? "three" : "two";
+    exitOrientation = rng() < 0.55 ? "split" : pickOne(rng, ["ahead", "left", "right"] as const);
   } else if (archetype === "exit_foyer") {
     exitCount = "one";
     exitOrientation = "ahead";
@@ -279,16 +316,59 @@ export function fallbackRoomDecision(state: CompactGameState, portalId: string):
     if (exitCount === "one") exitCount = "two";
   }
 
+  const lightingMood: LightingMood =
+    archetype === "poolcore"
+      ? "humid_teal"
+      : lighting === "dead"
+        ? "brownout"
+        : archetype === "stairwell"
+          ? pickOne(rng, ["cold_service", "brownout"] as const)
+          : pickWeighted<LightingMood>(rng, [
+              { value: "sick_yellow", w: 2.4 },
+              { value: "cold_service", w: 0.55 },
+              { value: "humid_teal", w: 0.35 },
+              { value: "brownout", w: lighting === "dim" ? 0.7 : 0.2 },
+            ]);
+
+  const tunnelMood: TunnelMood =
+    archetype === "poolcore"
+      ? "pool_pipe"
+      : archetype === "flooded_lobby"
+        ? "damp_service"
+        : lighting === "dead"
+          ? "dark_throat"
+          : pickWeighted<TunnelMood>(rng, [
+              { value: "yellow_throat", w: 2.1 },
+              { value: "damp_service", w: 0.8 },
+              { value: "pool_pipe", w: 0.55 },
+              { value: "dark_throat", w: 0.45 },
+            ]);
+  const tunnelLength: TunnelLength = pickWeighted<TunnelLength>(rng, [
+    { value: "short", w: 1.1 },
+    { value: "medium", w: 2.2 },
+    { value: "long", w: state.depth >= 4 ? 0.9 : 0.35 },
+  ]);
+  const entityPressure = 0.35 + state.depth * 0.1 + (entityBehavior === "absent" ? 0 : 0.7) + rng() * 0.4;
+
   return ensureTraversableDecision({
     roomArchetype: archetype,
     size: pickOne(rng, sizePool),
     lighting,
+    lightingMood,
     hazard,
     loot,
     entityPresent: entityBehavior !== "absent",
     entityPresentNoul: entityBehavior === "absent" ? presentRoll * 0.4 : 0.55 + presentRoll * 0.4,
     entityBehavior,
-    ambience: pickOne(rng, AMBIENCES),
+    ambience:
+      archetype === "poolcore"
+        ? pickWeighted(rng, [
+            { value: "drip" as const, w: 2.4 },
+            { value: "hum" as const, w: 0.8 },
+            { value: "silence" as const, w: 0.35 },
+            { value: "whisper_static" as const, w: 0.25 },
+          ])
+        : pickOne(rng, AMBIENCES),
     fearIntensity: 0.6 + state.depth * 0.18 + (lighting === "dead" ? 0.7 : 0) + rng() * 0.5,
     layoutMotif: pickOne(rng, LAYOUT_MOTIFS),
     exitCount,
@@ -303,6 +383,9 @@ export function fallbackRoomDecision(state: CompactGameState, portalId: string):
     soundBait: soundBaitNoul >= 0.55,
     soundBaitNoul,
     entityAggression: 0.4 + state.depth * 0.08 + (state.player.noise > 0.45 ? 0.5 : 0),
+    entityPressure,
+    tunnelLength,
+    tunnelMood,
   }, state.depth);
 }
 
@@ -346,6 +429,8 @@ export function notesFor(seed: string): string {
     "Don't run in the cubicles. It likes the corners.",
     "A door that shimmers is still deciding. Wait or it invents you.",
     "It stood in the jamb until I said hello. Then it had joints.",
+    "The water is warmer than the air. That is not a kindness.",
+    "Tile grout counts the drips. I stopped counting at four hundred.",
   ];
   return notes[hashString(seed) % notes.length]!;
 }

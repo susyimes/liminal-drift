@@ -15,6 +15,8 @@ export class AudioEngine {
   private muted = typeof localStorage !== "undefined" && localStorage.getItem(MUTE_KEY) === "1";
   private ambience: Ambience = "hum";
   private proximity = 0;
+  private humidity = false;
+  private inTunnel = false;
 
   get isMuted(): boolean {
     return this.muted;
@@ -63,7 +65,19 @@ export class AudioEngine {
 
   setPortal(pending: boolean): void {
     if (!this.ctx || !this.portalGain) return;
-    this.portalGain.gain.setTargetAtTime(pending ? 0.045 : 0.0001, this.ctx.currentTime, 0.08);
+    this.portalGain.gain.setTargetAtTime(pending ? 0.045 : this.inTunnel ? 0.018 : 0.0001, this.ctx.currentTime, 0.08);
+  }
+
+  setTunnel(active: boolean, mood = "yellow_throat"): void {
+    this.inTunnel = active;
+    if (mood === "pool_pipe" || mood === "damp_service") this.humidity = true;
+    if (!active && !this.humidity) {
+      /* keep humidity if the destination still wants it */
+    }
+  }
+
+  setHumidity(on: boolean): void {
+    this.humidity = on;
   }
 
   update(dt: number, moving: boolean, sneak: boolean, fear: number, surface: "carpet" | "wet" | "concrete" = "carpet"): void {
@@ -73,8 +87,8 @@ export class AudioEngine {
       this.ambience === "silence" ? 0.01 : this.ambience === "hum" ? 0.055 : this.ambience === "whisper_static" ? 0.028 : 0.032;
     this.humGain.gain.setTargetAtTime(humLevel + this.proximity * 0.03, t, 0.22);
     const air =
-      this.ambience === "silence" ? 0.006 : this.ambience === "whisper_static" ? 0.03 : this.ambience === "drip" ? 0.014 : 0.012;
-    this.airGain.gain.setTargetAtTime(air + fear * 0.00008, t, 0.3);
+      this.ambience === "silence" ? 0.006 : this.ambience === "whisper_static" ? 0.03 : this.ambience === "drip" || this.humidity ? 0.018 : 0.012;
+    this.airGain.gain.setTargetAtTime(air + fear * 0.00008 + (this.inTunnel ? 0.006 : 0), t, 0.3);
     this.rumbleGain.gain.setTargetAtTime(this.proximity > 0.35 ? (this.proximity - 0.35) * 0.12 : 0.0001, t, 0.15);
 
     if (moving) {
@@ -90,9 +104,9 @@ export class AudioEngine {
 
     this.dripTimer -= dt;
     if (this.dripTimer <= 0) {
-      if (this.ambience === "drip" || this.ambience === "whisper_static") this.click(this.ambience);
+      if (this.ambience === "drip" || this.humidity || this.ambience === "whisper_static") this.click(this.ambience === "whisper_static" ? "whisper_static" : "drip");
       else if (Math.random() < 0.35) this.click("drip");
-      this.dripTimer = this.ambience === "drip" ? 0.65 + Math.random() * 1.3 : 2.1 + Math.random() * 2.4;
+      this.dripTimer = this.ambience === "drip" || this.humidity ? 0.55 + Math.random() * 1.1 : 2.1 + Math.random() * 2.4;
     }
 
     if (this.ambience === "footsteps" && Math.random() < dt * 0.4) {

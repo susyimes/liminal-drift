@@ -62,7 +62,9 @@ export class DriftParticles {
     }
     pos.needsUpdate = true;
     const dustMat = this.dust.material as THREE.PointsMaterial;
-    dustMat.opacity = player.flashlightOn ? 0.26 : 0.14;
+    const pool = world.current.archetype === "poolcore" || world.transit?.tunnel.mood === "pool_pipe";
+    dustMat.color.setHex(pool ? 0xb8fff8 : 0xe8d48a);
+    dustMat.opacity = player.flashlightOn ? (pool ? 0.2 : 0.26) : 0.14;
 
     const hit = world.nearestDoor(player.x, player.z);
     const pending = Boolean(waiting && hit && hit.door.generation === "pending");

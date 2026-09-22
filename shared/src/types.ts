@@ -6,6 +6,7 @@ export const ROOM_ARCHETYPES = [
   "stairwell",
   "dead_end",
   "exit_foyer",
+  "poolcore",
 ] as const;
 export type RoomArchetype = (typeof ROOM_ARCHETYPES)[number];
 
@@ -14,6 +15,15 @@ export type RoomSize = (typeof ROOM_SIZES)[number];
 
 export const LIGHTING_MODES = ["flickering", "dim", "harsh", "dead"] as const;
 export type LightingMode = (typeof LIGHTING_MODES)[number];
+
+export const LIGHTING_MOODS = ["sick_yellow", "humid_teal", "cold_service", "brownout"] as const;
+export type LightingMood = (typeof LIGHTING_MOODS)[number];
+
+export const TUNNEL_LENGTHS = ["short", "medium", "long"] as const;
+export type TunnelLength = (typeof TUNNEL_LENGTHS)[number];
+
+export const TUNNEL_MOODS = ["yellow_throat", "damp_service", "pool_pipe", "dark_throat"] as const;
+export type TunnelMood = (typeof TUNNEL_MOODS)[number];
 
 export const HAZARDS = ["none", "puddle_slip", "dark_patch", "buzzing_overload"] as const;
 export type Hazard = (typeof HAZARDS)[number];
@@ -133,6 +143,7 @@ export type CompactRoomMemory = {
   id: string;
   archetype: RoomArchetype;
   lighting: LightingMode;
+  lightingMood?: LightingMood;
   ambience: Ambience;
   hazard: Hazard;
   encounter?: EncounterCard;
@@ -180,6 +191,7 @@ export type RoomDecision = {
   roomArchetype: RoomArchetype;
   size: RoomSize;
   lighting: LightingMode;
+  lightingMood: LightingMood;
   hazard: Hazard;
   loot: LootType;
   entityPresent: boolean;
@@ -200,6 +212,9 @@ export type RoomDecision = {
   soundBait: boolean;
   soundBaitNoul: number;
   entityAggression: number;
+  entityPressure: number;
+  tunnelLength: TunnelLength;
+  tunnelMood: TunnelMood;
 };
 
 export type EntityDecision = {

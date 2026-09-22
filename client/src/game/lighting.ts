@@ -1,3 +1,5 @@
+import type { LightingMood, TunnelMood } from "@liminal/shared";
+
 /** Calm tube flicker — mood, not a strobe. Frequencies stay under ~1 Hz. */
 export function tubeFlickerMul(opts: {
   buzzing: boolean;
@@ -63,4 +65,38 @@ export function doorFrameHex(explored: boolean): number {
 /** Start-room wayfinding lamp — slow breathe, not a flicker. */
 export function startGuideMul(time: number): number {
   return 1 + Math.sin(time * 0.72) * 0.055;
+}
+
+/** Fixture color grade. Mood is palette; flicker/dim stays separate. */
+export function lightHexForMood(mood: LightingMood | string, here: boolean): number {
+  if (mood === "humid_teal") return here ? 0xb6fff6 : 0x4a8a86;
+  if (mood === "cold_service") return here ? 0xd4e2ee : 0x6a7c88;
+  if (mood === "brownout") return here ? 0xd0a85a : 0x5a4a28;
+  return here ? 0xfff1b0 : 0x8fa0b4;
+}
+
+export function tubeEmissiveHex(mood: LightingMood | string): number {
+  if (mood === "humid_teal") return 0xa8fff4;
+  if (mood === "cold_service") return 0xdce8f4;
+  if (mood === "brownout") return 0xe0b86a;
+  return 0xfff1b0;
+}
+
+/** Tunnel tubes: slower and quieter than room flicker. Never a strobe. */
+export function tunnelTubeMul(time: number, phase: number): number {
+  return 0.96 + Math.sin(time * 0.85 + phase) * 0.03;
+}
+
+/** Soft door-frame while walking a throat — readable, not a flash. */
+export function tunnelOverlayOpacity(progress: number, waiting: boolean): number {
+  const p = Math.min(1, Math.max(0, progress));
+  const mid = 0.16 + Math.sin(p * Math.PI) * 0.08;
+  return waiting ? mid + 0.05 : mid;
+}
+
+export function tunnelFogHex(mood: TunnelMood | string): number {
+  if (mood === "pool_pipe") return 0x1a4044;
+  if (mood === "damp_service") return 0x2a3228;
+  if (mood === "dark_throat") return 0x12161c;
+  return 0x6a5828;
 }

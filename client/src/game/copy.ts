@@ -8,6 +8,14 @@ const VIBE_ZH: Record<RoomArchetype, string> = {
   stairwell: "楼梯间",
   dead_end: "死路",
   exit_foyer: "出口门厅",
+  poolcore: "池核",
+};
+
+const TUNNEL_ZH: Record<string, string> = {
+  yellow_throat: "黄喉通道",
+  damp_service: "潮湿后勤",
+  pool_pipe: "池核管道",
+  dark_throat: "暗喉",
 };
 
 export function roomVibeZh(archetype: RoomArchetype | string): string {
@@ -20,6 +28,10 @@ export function roomVibeHud(archetype: RoomArchetype | string): string {
 
 export function depthHudText(depth: number): string {
   return `深度 DEPTH ${depth}`;
+}
+
+export function tunnelVibeHud(mood: string): string {
+  return `${TUNNEL_ZH[mood] ?? "阈限通道"} · ${mood}`;
 }
 
 export const OPENING_HINT = "往前走。找一扇门。";
