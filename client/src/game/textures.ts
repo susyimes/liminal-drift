@@ -170,11 +170,11 @@ function ceilingTiles(): THREE.CanvasTexture {
 
 function tileWall(): THREE.CanvasTexture {
   const { c, ctx } = canvas(512);
-  ctx.fillStyle = "#d8ecec";
+  ctx.fillStyle = "#dceeee";
   ctx.fillRect(0, 0, 512, 512);
-  const grout = 3;
-  ctx.fillStyle = "#7aa0a4";
-  for (let i = 0; i <= 512; i += 64) {
+  const grout = 5;
+  ctx.fillStyle = "#b8a060";
+  for (let i = 0; i <= 512; i += 96) {
     ctx.fillRect(i - grout / 2, 0, grout, 512);
     ctx.fillRect(0, i - grout / 2, 512, grout);
   }
@@ -182,29 +182,37 @@ function tileWall(): THREE.CanvasTexture {
   for (let y = 0; y < 512; y += 1) {
     for (let x = 0; x < 512; x += 1) {
       const i = (y * 512 + x) * 4;
-      const stain = Math.max(0, fbm(x / 90, y / 70, 61) - 0.62) * 40;
+      const stain = Math.max(0, fbm(x / 90, y / 70, 61) - 0.58) * 48;
       const grit = (hash(x, y, 61) - 0.5) * 10;
-      img.data[i] = Math.max(0, Math.min(255, (img.data[i] ?? 200) - stain * 0.4 + grit));
-      img.data[i + 1] = Math.max(0, Math.min(255, (img.data[i + 1] ?? 220) - stain * 0.1 + grit));
-      img.data[i + 2] = Math.max(0, Math.min(255, (img.data[i + 2] ?? 220) + stain * 0.15 + grit));
+      const yellow = Math.max(0, fbm(x / 120, y / 40, 88) - 0.55) * 36;
+      img.data[i] = Math.max(0, Math.min(255, (img.data[i] ?? 200) - stain * 0.25 + yellow + grit));
+      img.data[i + 1] = Math.max(0, Math.min(255, (img.data[i + 1] ?? 220) - stain * 0.08 + yellow * 0.55 + grit));
+      img.data[i + 2] = Math.max(0, Math.min(255, (img.data[i + 2] ?? 220) + stain * 0.12 - yellow * 0.4 + grit));
     }
   }
   ctx.putImageData(img, 0, 0);
+  ctx.fillStyle = "rgba(70, 90, 40, 0.22)";
+  ctx.beginPath();
+  ctx.ellipse(20, 490, 70, 46, 0.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(500, 20, 56, 40, 0.4, 0, Math.PI * 2);
+  ctx.fill();
   ctx.fillStyle = "rgba(30, 80, 90, 0.12)";
   ctx.beginPath();
   ctx.ellipse(180, 220, 90, 36, 0.3, 0, Math.PI * 2);
   ctx.fill();
-  return toTexture(c, 3);
+  return toTexture(c, 2);
 }
 
 function tileFloor(): { map: THREE.CanvasTexture; rough: THREE.CanvasTexture } {
   const { c, ctx } = canvas(512);
-  ctx.fillStyle = "#c5e4e6";
+  ctx.fillStyle = "#c8e6e8";
   ctx.fillRect(0, 0, 512, 512);
-  ctx.fillStyle = "#5e888c";
-  for (let i = 0; i <= 512; i += 48) {
-    ctx.fillRect(i - 1, 0, 2, 512);
-    ctx.fillRect(0, i - 1, 512, 2);
+  ctx.fillStyle = "#c4a45a";
+  for (let i = 0; i <= 512; i += 80) {
+    ctx.fillRect(i - 2, 0, 4, 512);
+    ctx.fillRect(0, i - 2, 512, 4);
   }
   const img = ctx.getImageData(0, 0, 512, 512);
   for (let y = 0; y < 512; y += 1) {
@@ -269,6 +277,37 @@ function water(): THREE.CanvasTexture {
   return toTexture(c, 4);
 }
 
+function poolCeiling(): THREE.CanvasTexture {
+  const { c, ctx } = canvas(512);
+  ctx.fillStyle = "#c6d4d2";
+  ctx.fillRect(0, 0, 512, 512);
+  ctx.strokeStyle = "rgba(90, 110, 108, 0.4)";
+  ctx.lineWidth = 2;
+  for (let i = 0; i <= 512; i += 128) {
+    ctx.beginPath();
+    ctx.moveTo(i, 0);
+    ctx.lineTo(i, 512);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, i);
+    ctx.lineTo(512, i);
+    ctx.stroke();
+  }
+  for (let i = 0; i < 40; i += 1) {
+    const x = (i * 73) % 512;
+    const y = (i * 97) % 512;
+    ctx.fillStyle = `rgba(180, 210, 214, ${0.18 + (i % 5) * 0.05})`;
+    ctx.beginPath();
+    ctx.ellipse(x, y, 4 + (i % 3), 7 + (i % 4), 0.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.fillStyle = "rgba(80, 120, 120, 0.16)";
+  ctx.beginPath();
+  ctx.ellipse(80, 40, 90, 28, 0.1, 0, Math.PI * 2);
+  ctx.fill();
+  return toTexture(c, 2);
+}
+
 function coneGradient(): THREE.CanvasTexture {
   const { c, ctx } = canvas(256);
   const g = ctx.createLinearGradient(0, 0, 0, 256);
@@ -313,6 +352,7 @@ const waterMap = water();
 const tileWallMap = tileWall();
 const tileFloorMaps = tileFloor();
 const poolWaterMap = poolWater();
+const poolCeilingMap = poolCeiling();
 
 export const tex = {
   wall: wallMap,
@@ -322,6 +362,7 @@ export const tex = {
   tileWall: tileWallMap,
   tileFloor: tileFloorMaps.map,
   tileFloorRough: tileFloorMaps.rough,
+  poolCeiling: poolCeilingMap,
   wallNorm,
   carpet: carpetDry.map,
   carpetRough: carpetDry.rough,

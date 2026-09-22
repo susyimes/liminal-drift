@@ -9,6 +9,11 @@ const VIBE_ZH: Record<RoomArchetype, string> = {
   dead_end: "死路",
   exit_foyer: "出口门厅",
   poolcore: "池核",
+  hotel_hall: "酒店走廊",
+  parking_ramp: "停车坡道",
+  machine_room: "机房",
+  empty_classroom: "空教室",
+  unfinished: "未完工",
 };
 
 const TUNNEL_ZH: Record<string, string> = {

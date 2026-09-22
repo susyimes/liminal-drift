@@ -10,10 +10,16 @@ import {
   ENTITY_BEHAVIORS,
   ENTITY_INTENTS,
   EXIT_COUNTS,
+  EXIT_LAYOUTS,
+  HUMIDITIES,
   JEV_MODEL,
   LAYOUT_MOTIFS,
   LIGHTING_MOODS,
+  LIGHTING_STYLES,
+  NARRATIVE_CRUMBS,
+  POOLCORE_VARIANTS,
   ROOM_ARCHETYPES,
+  SOUND_BEDS,
   TUNNEL_LENGTHS,
   TUNNEL_MOODS,
   type CompactGameState,
@@ -76,7 +82,15 @@ test("room questions are a fat systemone set and encounter is optional", () => {
   assert.ok(early.entity_pressure);
   assert.ok(early.tunnel_length);
   assert.ok(early.tunnel_mood);
+  assert.ok(early.lighting_style);
+  assert.ok(early.exit_layout);
+  assert.ok(early.poolcore_variant);
+  assert.ok(early.humidity);
+  assert.ok(early.sound_bed);
+  assert.ok(early.narrative_crumb);
   assert.ok("poolcore" in (early.room_archetype.criteria ?? {}));
+  assert.ok("hotel_hall" in (early.room_archetype.criteria ?? {}));
+  assert.ok("empty_classroom" in (early.room_archetype.criteria ?? {}));
   assert.equal(early.encounter_card, undefined);
 
   const late = buildQuestions(state({ depth: 8, roomsVisited: 8, player: { sanity: 70, battery: 20, hasKeycard: false, noise: 0.6, moving: true } }));
@@ -96,6 +110,13 @@ test("fallback rooms fill every director field with legal enums", () => {
   assert.ok(LIGHTING_MOODS.includes(decision.lightingMood));
   assert.ok(TUNNEL_LENGTHS.includes(decision.tunnelLength));
   assert.ok(TUNNEL_MOODS.includes(decision.tunnelMood));
+  assert.ok(LIGHTING_STYLES.includes(decision.lightingStyle));
+  assert.ok(EXIT_LAYOUTS.includes(decision.exitLayout));
+  assert.ok(POOLCORE_VARIANTS.includes(decision.poolcoreVariant));
+  assert.ok(HUMIDITIES.includes(decision.humidity));
+  assert.ok(SOUND_BEDS.includes(decision.soundBed));
+  assert.ok(NARRATIVE_CRUMBS.includes(decision.narrativeCrumb));
+  assert.equal(typeof decision.familiarReturn, "boolean");
   assert.equal(typeof decision.entityPressure, "number");
   assert.ok(encounterAllowed(state(), decision.encounterCard) || decision.encounterCard === "none");
   assert.equal(typeof decision.advancesExit, "boolean");
@@ -120,6 +141,12 @@ test("mapRoomDecision uses fallback when answers are empty and applies valid ans
       encounter_card: { type: "choice", choice: "safe_alcove" },
       fear_intensity: { type: "score", score: 2.2 },
       lighting_mood: { type: "choice", choice: "humid_teal" },
+      lighting_style: { type: "choice", choice: "half_dead" },
+      exit_layout: { type: "choice", choice: "t_junction" },
+      poolcore_variant: { type: "choice", choice: "none" },
+      humidity: { type: "choice", choice: "damp" },
+      sound_bed: { type: "choice", choice: "drip" },
+      narrative_crumb: { type: "choice", choice: "wet_footprints" },
       tunnel_length: { type: "choice", choice: "long" },
       tunnel_mood: { type: "choice", choice: "pool_pipe" },
       entity_pressure: { type: "score", score: 2.4 },
@@ -129,6 +156,11 @@ test("mapRoomDecision uses fallback when answers are empty and applies valid ans
   );
   assert.equal(mapped.roomArchetype, "maze_cubicles");
   assert.equal(mapped.lightingMood, "humid_teal");
+  assert.equal(mapped.lightingStyle, "half_dead");
+  assert.equal(mapped.exitLayout, "t_junction");
+  assert.equal(mapped.humidity, "damp");
+  assert.equal(mapped.soundBed, "drip");
+  assert.equal(mapped.narrativeCrumb, "wet_footprints");
   assert.equal(mapped.tunnelLength, "long");
   assert.equal(mapped.tunnelMood, "pool_pipe");
   assert.equal(mapped.entityPressure, 2.4);
@@ -158,12 +190,16 @@ test("early fallback rooms always keep a real forward exit", () => {
     for (let i = 0; i < 40; i += 1) {
       const decision = fallbackRoomDecision(state({ depth, roomsVisited: depth }), `p-${depth}-${i}`);
       assert.notEqual(decision.roomArchetype, "dead_end");
-      assert.equal(decision.deadEndBait, false);
+      if (depth < 2) assert.equal(decision.deadEndBait, false);
       assert.notEqual(decision.exitOrientation, "behind_only");
       const planned = planDoorWalls("s", decision);
       const forward = planned.real.filter((wall) => wall !== "s");
       assert.ok(forward.length >= 1, `depth ${depth} seed ${i} has no forward door`);
       assert.ok(forward.length >= 2, `depth ${depth} seed ${i} is still a single-portal room`);
+      if (decision.deadEndBait) {
+        assert.ok(planned.fake.length <= 1);
+        assert.ok(forward.length >= 2, `bait stole a real exit at depth ${depth} seed ${i}`);
+      }
     }
   }
 });
@@ -195,15 +231,17 @@ test("two-exit halls also open a side throat, not only ahead", () => {
   assert.ok(forward.length >= 2);
 });
 
-test("deadEndBait paints at most one throat and keeps a real exit", () => {
-  const sealed = planDoorWalls("s", {
+test("deadEndBait paints an extra throat and keeps two real exits", () => {
+  const tee = planDoorWalls("s", {
     roomArchetype: "empty_office",
-    exitCount: "three",
+    exitCount: "two",
     exitOrientation: "split",
     deadEndBait: true,
+    exitLayout: "t_junction",
   });
-  assert.ok(sealed.real.filter((wall) => wall !== "s").length >= 1);
-  assert.ok(sealed.fake.length <= 1);
+  assert.ok(tee.real.filter((wall) => wall !== "s").length >= 2);
+  assert.ok(tee.fake.length === 1);
+  assert.ok(tee.fake.includes("n"));
 
   const onlyOne = planDoorWalls("s", {
     roomArchetype: "long_hall",
@@ -211,8 +249,8 @@ test("deadEndBait paints at most one throat and keeps a real exit", () => {
     exitOrientation: "ahead",
     deadEndBait: true,
   });
-  assert.deepEqual(onlyOne.real.filter((wall) => wall !== "s"), ["n"]);
-  assert.deepEqual(onlyOne.fake, []);
+  assert.ok(onlyOne.real.filter((wall) => wall !== "s").length >= 2);
+  assert.ok(onlyOne.fake.length <= 1);
 
   const behind = planDoorWalls("s", {
     roomArchetype: "empty_office",
@@ -221,6 +259,35 @@ test("deadEndBait paints at most one throat and keeps a real exit", () => {
     deadEndBait: false,
   });
   assert.ok(behind.real.includes("n"));
+});
+
+test("T / cross / loop layouts stay multi-exit graphs", () => {
+  const tee = planDoorWalls("s", {
+    roomArchetype: "hotel_hall",
+    exitCount: "two",
+    exitOrientation: "split",
+    deadEndBait: false,
+    exitLayout: "t_junction",
+  });
+  assert.deepEqual(new Set(tee.real.filter((wall) => wall !== "s")), new Set(["e", "w"]));
+
+  const cross = planDoorWalls("s", {
+    roomArchetype: "empty_office",
+    exitCount: "three",
+    exitOrientation: "split",
+    deadEndBait: false,
+    exitLayout: "cross",
+  });
+  assert.equal(cross.real.filter((wall) => wall !== "s").length, 3);
+
+  const loop = planDoorWalls("s", {
+    roomArchetype: "parking_ramp",
+    exitCount: "two",
+    exitOrientation: "left",
+    deadEndBait: true,
+    exitLayout: "loop_side",
+  });
+  assert.ok(loop.real.filter((wall) => wall !== "s").length >= 2);
 });
 
 test("ensureTraversableDecision strips early dead-ends from Jev answers", () => {
@@ -244,6 +311,34 @@ test("ensureTraversableDecision strips early dead-ends from Jev answers", () => 
     10,
   );
   assert.equal(late.roomArchetype, "dead_end");
+});
+
+test("fallback can emit a familiar same-kind return", () => {
+  let seen = false;
+  for (let i = 0; i < 80; i += 1) {
+    const decision = fallbackRoomDecision(state({ depth: 5, roomsVisited: 5 }), `fam-${i}`);
+    if (decision.familiarReturn) {
+      seen = true;
+      assert.ok(["empty_office", "long_hall"].includes(decision.roomArchetype));
+      break;
+    }
+  }
+  assert.equal(seen, true, "fallback never marked a familiar return");
+});
+
+test("poolcore fallback leans wet and empty, not a jump scare", () => {
+  let seen = false;
+  for (let i = 0; i < 100; i += 1) {
+    const decision = fallbackRoomDecision(state({ depth: 6, roomsVisited: 6 }), `wet-${i}`);
+    if (decision.roomArchetype === "poolcore") {
+      seen = true;
+      assert.notEqual(decision.poolcoreVariant, "none");
+      assert.ok(decision.humidity === "damp" || decision.humidity === "heavy");
+      assert.ok(["drip", "silence_ring", "hvac_hum", "distant_footsteps"].includes(decision.soundBed));
+      break;
+    }
+  }
+  assert.equal(seen, true);
 });
 
 test("entity fallback and mapping include cutoff + bait", () => {

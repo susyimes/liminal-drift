@@ -308,7 +308,15 @@ export class World {
         room.guideLight.intensity = stillOpen ? room.guideBase * startGuideMul(time) : 0;
       }
     }
-    for (const tunnel of this.tunnels) updateTunnelLights(tunnel, time);
+    for (const tunnel of this.tunnels) updateTunnelLights(tunnel, time, performance.now());
+    for (const room of this.rooms.values()) {
+      for (const puddle of room.puddles) {
+        const mat = puddle.material;
+        if (mat instanceof THREE.MeshStandardMaterial) {
+          mat.opacity = 0.32 + Math.sin(time * 1.4 + puddle.position.x) * 0.05;
+        }
+      }
+    }
   }
 
   async considerPrefetch(px: number, pz: number, compact: CompactGameState): Promise<void> {
@@ -446,6 +454,7 @@ export class World {
       this.tunnels.push(tunnel);
       this.scene.add(tunnel.group);
     }
+    tunnel.litAt = performance.now();
     this.transit = {
       tunnel,
       parent,

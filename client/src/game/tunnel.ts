@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { hashString, type TunnelLength, type TunnelMood } from "@liminal/shared";
-import { lightHexForMood, tunnelTubeMul } from "./lighting.ts";
+import { lightHexForMood, tunnelStartupFlicker, tunnelTubeMul } from "./lighting.ts";
 import { aabbFromCenter, rotateY, type Aabb } from "./math.ts";
 import type { BuiltRoom, Door, RoomLight } from "./rooms.ts";
 import { doorOutward, doorWorldPos } from "./rooms.ts";
@@ -29,11 +29,12 @@ export type BuiltTunnel = {
   lights: RoomLight[];
   farVeil: THREE.Mesh;
   surface: "carpet" | "wet" | "concrete";
+  litAt: number;
 };
 
-const HEIGHT = 2.55;
-const WIDTH = 2.62;
-const WALL_T = 0.16;
+const HEIGHT = 2.38;
+const WIDTH = 1.86;
+const WALL_T = 0.18;
 
 function std(opts: THREE.MeshStandardMaterialParameters): THREE.MeshStandardMaterial {
   return new THREE.MeshStandardMaterial({ roughness: 0.86, metalness: 0.02, ...opts });
@@ -57,10 +58,10 @@ function moodPalette(mood: TunnelMood): {
         roughness: 0.16,
         metalness: 0.22,
       }),
-      ceiling: std({ color: 0xc8d8d8, map: tex.tileWall, roughness: 0.4 }),
+      ceiling: std({ color: 0xc8d8d8, map: tex.poolCeiling ?? tex.tileWall, roughness: 0.4 }),
       lightMood: "humid_teal",
       surface: "wet",
-      intensity: 11,
+      intensity: 10,
     };
   }
   if (mood === "damp_service") {
@@ -70,7 +71,7 @@ function moodPalette(mood: TunnelMood): {
       ceiling: std({ color: 0x8a8878, map: tex.concrete, roughness: 0.95 }),
       lightMood: "cold_service",
       surface: "wet",
-      intensity: 8,
+      intensity: 7.4,
     };
   }
   if (mood === "dark_throat") {
@@ -80,16 +81,16 @@ function moodPalette(mood: TunnelMood): {
       ceiling: std({ color: 0x2e2c26, roughness: 0.96 }),
       lightMood: "brownout",
       surface: "concrete",
-      intensity: 4.2,
+      intensity: 3.8,
     };
   }
   return {
     wall: std({ color: 0xe4d25a, map: tex.wall, roughness: 0.9 }),
     floor: std({ color: 0xc4a056, map: tex.carpet, roughness: 0.58, metalness: 0.06 }),
     ceiling: std({ color: 0xc9c3a6, map: tex.ceiling, roughness: 0.92 }),
-    lightMood: "sick_yellow",
+    lightMood: "cold_service",
     surface: "carpet",
-    intensity: 10,
+    intensity: 9.2,
   };
 }
 
@@ -113,19 +114,19 @@ export function buildTunnel(options: {
   group.rotation.y = yaw;
 
   const floorMat = palette.floor.clone();
-  if (floorMat.map) floorMat.map = tiled(floorMat.map, WIDTH / 1.6, length / 2.2);
+  if (floorMat.map) floorMat.map = tiled(floorMat.map, WIDTH / 1.4, length / 1.8);
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(WIDTH, length), floorMat);
   floor.rotation.x = -Math.PI / 2;
   group.add(floor);
 
   if (options.mood === "pool_pipe" || options.mood === "damp_service") {
     const water = new THREE.Mesh(
-      new THREE.PlaneGeometry(WIDTH - 0.2, length - 0.2),
+      new THREE.PlaneGeometry(WIDTH - 0.28, length - 0.28),
       std({
         color: options.mood === "pool_pipe" ? 0x2a8898 : 0x2d4036,
         map: options.mood === "pool_pipe" ? tex.poolWater : tex.water,
         transparent: true,
-        opacity: 0.32,
+        opacity: 0.3,
         roughness: 0.12,
         metalness: 0.2,
       }),
@@ -145,48 +146,95 @@ export function buildTunnel(options: {
   const wallX = WIDTH / 2;
   for (const side of [-1, 1]) {
     const wmat = palette.wall.clone();
-    if (wmat.map) wmat.map = tiled(wmat.map, length / 2.2, HEIGHT / 2.2);
+    if (wmat.map) wmat.map = tiled(wmat.map, length / 1.8, HEIGHT / 2.0);
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(WALL_T, HEIGHT, length + WALL_T), wmat);
     mesh.position.set(side * wallX, HEIGHT / 2, 0);
     group.add(mesh);
     collidersLocal.push(aabbFromCenter(side * wallX, HEIGHT / 2, 0, WALL_T / 2 + 0.04, HEIGHT / 2, wallZ));
+    const inner = new THREE.Mesh(
+      new THREE.PlaneGeometry(length, HEIGHT * 0.92),
+      new THREE.MeshBasicMaterial({
+        color: options.mood === "pool_pipe" ? 0x8ec8c4 : 0x9aa89a,
+        transparent: true,
+        opacity: 0.05,
+        depthWrite: false,
+      }),
+    );
+    inner.position.set(side * (wallX - 0.06), HEIGHT / 2, 0);
+    inner.rotation.y = side * (Math.PI / 2);
+    group.add(inner);
   }
 
   const lights: RoomLight[] = [];
-  const spacing = options.length === "short" ? 3.1 : 3.4;
-  for (let z = -wallZ + 1.6; z < wallZ - 0.6; z += spacing) {
-    const housing = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.06, 0.28), std({ color: 0x4a5348, metalness: 0.5, roughness: 0.4 }));
-    housing.position.set(0, HEIGHT - 0.05, z);
+  const tubes = 4;
+  for (let i = 0; i < tubes; i += 1) {
+    const t = (i + 0.55) / tubes;
+    const z = -wallZ + t * length;
+    const along = i / Math.max(1, tubes - 1);
+    const dead = along > 0.72;
+    const fade = 1 - along * 0.62;
+    const housing = new THREE.Mesh(
+      new THREE.BoxGeometry(1.18, 0.05, 0.22),
+      std({ color: 0x4a5348, metalness: 0.5, roughness: 0.4 }),
+    );
+    housing.position.set(0, HEIGHT - 0.04, z);
     group.add(housing);
     const tube = new THREE.Mesh(
-      new THREE.BoxGeometry(1.15, 0.04, 0.14),
+      new THREE.BoxGeometry(1.02, 0.035, 0.11),
       new THREE.MeshStandardMaterial({
-        color: 0xfff6d0,
-        emissive: tubeEmissiveFor(palette.lightMood),
-        emissiveIntensity: 1.15,
+        color: dead ? 0x6a6558 : 0xe8fff6,
+        emissive: dead ? 0x000000 : 0xc8fff0,
+        emissiveIntensity: dead ? 0 : 1.05 * fade,
         roughness: 0.28,
       }),
     );
-    tube.position.set(0, HEIGHT - 0.1, z);
+    tube.position.set(0, HEIGHT - 0.09, z);
     group.add(tube);
-    const light = new THREE.PointLight(lightHexForMood(palette.lightMood, true), palette.intensity, 9.5, 1.55);
-    light.position.set(0, HEIGHT - 0.34, z);
-    group.add(light);
-    lights.push({ light, base: palette.intensity, phase: hashString(`${options.id}:${z}`) % 100, tube });
+    if (!dead) {
+      const light = new THREE.PointLight(
+        lightHexForMood("cold_service", true),
+        palette.intensity * fade,
+        6.4,
+        1.7,
+      );
+      light.position.set(0, HEIGHT - 0.3, z);
+      group.add(light);
+      lights.push({
+        light,
+        base: palette.intensity * fade,
+        phase: hashString(`${options.id}:${z}`) % 100,
+        tube,
+      });
+    }
   }
 
-  const veil = new THREE.Mesh(
-    new THREE.PlaneGeometry(WIDTH * 0.86, HEIGHT * 0.86),
+  const seam = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.07, HEIGHT * 0.52),
     new THREE.MeshBasicMaterial({
-      color: options.mood === "pool_pipe" ? 0x0a2428 : 0x1c1408,
+      color: 0xe8fff8,
       transparent: true,
-      opacity: 0.16,
+      opacity: 0.88,
       side: THREE.DoubleSide,
       depthWrite: false,
     }),
   );
-  veil.position.set(0, HEIGHT / 2, wallZ - 0.04);
-  group.add(veil);
+  seam.position.set(0, HEIGHT * 0.46, wallZ - 0.03);
+  group.add(seam);
+  const seamGlow = new THREE.PointLight(0xd8fff4, 4.6, 3.8, 1.8);
+  seamGlow.position.set(0, HEIGHT * 0.5, wallZ - 0.2);
+  group.add(seamGlow);
+  const haze = new THREE.Mesh(
+    new THREE.PlaneGeometry(WIDTH * 0.92, HEIGHT * 0.9),
+    new THREE.MeshBasicMaterial({
+      color: 0xb8d8d0,
+      transparent: true,
+      opacity: 0.06,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    }),
+  );
+  haze.position.set(0, HEIGHT / 2, wallZ * 0.35);
+  group.add(haze);
 
   const worldColliders = collidersLocal.map((box) => {
     const corners = [
@@ -243,25 +291,21 @@ export function buildTunnel(options: {
       maxZ: Math.max(...bzs),
     },
     lights,
-    farVeil: veil,
+    farVeil: seam,
     surface: palette.surface,
+    litAt: 0,
   };
 }
 
-function tubeEmissiveFor(mood: "sick_yellow" | "humid_teal" | "cold_service" | "brownout"): number {
-  if (mood === "humid_teal") return 0xa8fff4;
-  if (mood === "cold_service") return 0xdce8f4;
-  if (mood === "brownout") return 0xe0b86a;
-  return 0xfff1b0;
-}
-
-export function updateTunnelLights(tunnel: BuiltTunnel, time: number): void {
+export function updateTunnelLights(tunnel: BuiltTunnel, time: number, now = performance.now()): void {
+  const elapsed = tunnel.litAt > 0 ? (now - tunnel.litAt) / 1000 : 1;
+  const startMul = tunnelStartupFlicker(elapsed);
   for (const entry of tunnel.lights) {
-    const mul = tunnelTubeMul(time, entry.phase);
+    const mul = tunnelTubeMul(time, entry.phase) * startMul;
     entry.light.intensity = entry.base * mul;
     const tube = entry.tube.material;
     if (tube instanceof THREE.MeshStandardMaterial) {
-      tube.emissiveIntensity = 0.7 + mul * 0.45;
+      tube.emissiveIntensity = 0.62 + mul * 0.4;
     }
   }
 }

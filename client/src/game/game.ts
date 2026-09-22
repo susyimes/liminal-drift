@@ -204,7 +204,7 @@ export class Game {
     this.audio.setTunnel(false);
     this.audio.setHumidity(false);
     this.fearFromJev = 0.45;
-    this.enterFade = 0.55;
+    this.enterFade = 0.28;
     this.lastEnteredRoomId = this.world.currentId;
     this.toast = null;
     this.hint = OPENING_HINT;
@@ -323,7 +323,8 @@ export class Game {
       this.world.current.decision.lightingMood === "humid_teal" ||
       this.world.transit?.tunnel.mood === "pool_pipe";
     this.audio.setAmbience(inPool ? "drip" : this.world.current.decision.ambience);
-    this.audio.setHumidity(inPool);
+    const humidity = this.world.current.decision.humidity ?? (inPool ? "damp" : "dry");
+    this.audio.setHumidity(inPool || humidity !== "dry", humidity);
     this.audio.setProximity(prox);
     const surface = this.world.transit?.tunnel.surface ?? this.world.current.surface;
     this.audio.update(dt, this.player.moving, this.player.sneak, this.player.fear, surface);
@@ -383,11 +384,21 @@ export class Game {
     this.scene.background = new THREE.Color(
       pool || this.world.transit?.tunnel.mood === "pool_pipe" ? 0x0a1c1e : lighting === "dead" ? 0x0a0c10 : 0x2a220e,
     );
+    const humidity = this.world.current.decision.humidity ?? (pool ? "damp" : "dry");
     if (fog instanceof THREE.Fog) {
-      fog.near = this.world.transit ? 1.6 : lighting === "dead" ? 1.8 : pool ? 2.4 : 3.2;
+      fog.near = this.world.transit ? 1.15 : lighting === "dead" ? 1.8 : humidity === "heavy" ? 1.8 : pool ? 2.2 : 3.2;
       fog.far =
-        (this.world.transit ? 11 : lighting === "dead" ? 14 : lighting === "dim" || pool ? 17 : 23) -
-        this.player.fear * 0.04;
+        (this.world.transit
+          ? 6.2
+          : lighting === "dead"
+            ? 14
+            : humidity === "heavy"
+              ? 13
+              : humidity === "damp" || pool
+                ? 16
+                : lighting === "dim"
+                  ? 17
+                  : 23) - this.player.fear * 0.04;
       fog.color.setHex(fogColor);
     }
     const nearMat = this.hazeNear.material as THREE.MeshBasicMaterial;
@@ -407,9 +418,11 @@ export class Game {
       : enterFadeOpacity(this.enterFade);
     document.getElementById("vignette")?.style.setProperty(
       "opacity",
-      String(0.5 + this.player.fear / 180 + prox * 0.25 + enterVignetteAdd(this.enterFade)),
+      String(0.42 + this.player.fear / 200 + prox * 0.2 + enterVignetteAdd(this.enterFade)),
     );
-    document.getElementById("door-pass")?.style.setProperty("opacity", String(tunnelCover));
+    const doorPass = document.getElementById("door-pass");
+    doorPass?.classList.toggle("throat", Boolean(this.world.transit));
+    doorPass?.style.setProperty("opacity", String(tunnelCover));
     document.getElementById("static-overlay")?.style.setProperty("opacity", this.waitingDoor ? "0.06" : "0");
     document.getElementById("hurt")?.style.setProperty("opacity", this.hurtFlash > 0 ? String(this.hurtFlash * 0.55) : prox > 0.65 ? String((prox - 0.65) * 1.4) : "0");
     document.getElementById("grade")?.style.setProperty("opacity", String(0.18 + this.player.fear / 280 + this.hurtFlash * 0.35));
@@ -453,7 +466,6 @@ export class Game {
     this.player.x = tunnel.entry.x + tunnel.dir.x * 0.85;
     this.player.z = tunnel.entry.z + tunnel.dir.z * 0.85;
     this.player.yaw = tunnelWalkYaw(tunnel.dir);
-    this.enterFade = Math.max(this.enterFade, 0.62);
   }
 
   private markEntered(room: BuiltRoom): void {
@@ -467,8 +479,8 @@ export class Game {
   private onEnter(room: BuiltRoom): void {
     this.fearFromJev = room.decision.fearIntensity;
     this.entity.onNewRoom(room, this.player);
-    this.enterFade = 1;
-    this.player.punch = Math.max(this.player.punch, 0.048);
+    this.enterFade = 0.34;
+    this.player.punch = Math.max(this.player.punch, 0.032);
     this.audio.portalResolve();
     this.audio.enterLand(room.surface);
     if (room.id !== "start") this.hint = null;
@@ -552,7 +564,11 @@ export class Game {
       archetype: room.archetype,
       lighting: room.decision.lighting,
       lightingMood: room.decision.lightingMood,
+      lightingStyle: room.decision.lightingStyle,
       ambience: room.decision.ambience,
+      poolcoreVariant: room.decision.poolcoreVariant,
+      humidity: room.decision.humidity,
+      exitLayout: room.decision.exitLayout,
       hazard: room.decision.hazard,
       encounter: room.decision.encounterCard,
       motif: room.decision.layoutMotif,

@@ -89,7 +89,9 @@ export class Player {
     }
 
     this.speedMul = world.current.water && world.current.decision.encounterCard === "flooded_slow_zone" ? 0.62 : 1;
-    const slip = world.current.water && !this.sneak && Math.random() < dt * 0.7 ? 1.8 : 1;
+    const slipHazard =
+      world.current.decision.hazard === "environmental" || world.current.decision.hazard === "puddle_slip";
+    const slip = (world.current.water || slipHazard) && !this.sneak && Math.random() < dt * 0.7 ? 1.8 : 1;
     const speed = (this.sneak ? 1.35 : 3.05) * this.speedMul;
     const sin = Math.sin(this.yaw);
     const cos = Math.cos(this.yaw);

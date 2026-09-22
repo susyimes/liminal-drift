@@ -16,7 +16,10 @@ export class AudioEngine {
   private ambience: Ambience = "hum";
   private proximity = 0;
   private humidity = false;
+  private humidityLevel: "dry" | "damp" | "heavy" = "dry";
   private inTunnel = false;
+  private lowpass: BiquadFilterNode | null = null;
+  private verbGain: GainNode | null = null;
 
   get isMuted(): boolean {
     return this.muted;
@@ -27,9 +30,26 @@ export class AudioEngine {
       const ctx = new AudioContext();
       const master = ctx.createGain();
       master.gain.value = this.muted ? 0 : 0.24;
-      master.connect(ctx.destination);
+      const lowpass = ctx.createBiquadFilter();
+      lowpass.type = "lowpass";
+      lowpass.frequency.value = 14000;
+      const verb = ctx.createDelay(0.35);
+      verb.delayTime.value = 0.14;
+      const verbGain = ctx.createGain();
+      verbGain.gain.value = 0.0001;
+      const verbFb = ctx.createGain();
+      verbFb.gain.value = 0.28;
+      master.connect(lowpass);
+      lowpass.connect(ctx.destination);
+      master.connect(verb);
+      verb.connect(verbGain);
+      verb.connect(verbFb);
+      verbFb.connect(verb);
+      verbGain.connect(ctx.destination);
       this.ctx = ctx;
       this.master = master;
+      this.lowpass = lowpass;
+      this.verbGain = verbGain;
       this.startHum();
       this.startAir();
       this.startRumble();
@@ -71,13 +91,17 @@ export class AudioEngine {
   setTunnel(active: boolean, mood = "yellow_throat"): void {
     this.inTunnel = active;
     if (mood === "pool_pipe" || mood === "damp_service") this.humidity = true;
-    if (!active && !this.humidity) {
-      /* keep humidity if the destination still wants it */
+    if (this.ctx && this.lowpass) {
+      this.lowpass.frequency.setTargetAtTime(active ? 820 : 14000, this.ctx.currentTime, 0.06);
+    }
+    if (this.ctx && this.portalGain) {
+      this.portalGain.gain.setTargetAtTime(active ? 0.028 : 0.0001, this.ctx.currentTime, 0.08);
     }
   }
 
-  setHumidity(on: boolean): void {
-    this.humidity = on;
+  setHumidity(on: boolean, level: "dry" | "damp" | "heavy" = on ? "damp" : "dry"): void {
+    this.humidity = on || level !== "dry";
+    this.humidityLevel = level;
   }
 
   update(dt: number, moving: boolean, sneak: boolean, fear: number, surface: "carpet" | "wet" | "concrete" = "carpet"): void {
@@ -87,7 +111,15 @@ export class AudioEngine {
       this.ambience === "silence" ? 0.01 : this.ambience === "hum" ? 0.055 : this.ambience === "whisper_static" ? 0.028 : 0.032;
     this.humGain.gain.setTargetAtTime(humLevel + this.proximity * 0.03, t, 0.22);
     const air =
-      this.ambience === "silence" ? 0.006 : this.ambience === "whisper_static" ? 0.03 : this.ambience === "drip" || this.humidity ? 0.018 : 0.012;
+      this.ambience === "silence" || this.ambience === "whisper_static"
+        ? this.ambience === "whisper_static"
+          ? 0.03
+          : 0.007
+        : this.ambience === "drip" || this.humidity
+          ? this.humidityLevel === "heavy"
+            ? 0.024
+            : 0.018
+          : 0.012;
     this.airGain.gain.setTargetAtTime(air + fear * 0.00008 + (this.inTunnel ? 0.006 : 0), t, 0.3);
     this.rumbleGain.gain.setTargetAtTime(this.proximity > 0.35 ? (this.proximity - 0.35) * 0.12 : 0.0001, t, 0.15);
 
@@ -190,17 +222,25 @@ export class AudioEngine {
     this.footstep(false, surface);
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
+    if (this.verbGain) {
+      this.verbGain.gain.cancelScheduledValues(t);
+      this.verbGain.gain.setValueAtTime(0.16, t);
+      this.verbGain.gain.exponentialRampToValueAtTime(0.012, t + 1.15);
+    }
+    if (this.lowpass) {
+      this.lowpass.frequency.setTargetAtTime(14000, t, 0.12);
+    }
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     osc.type = "sine";
     osc.frequency.setValueAtTime(surface === "concrete" ? 78 : 62, t);
-    osc.frequency.exponentialRampToValueAtTime(38, t + 0.14);
-    gain.gain.setValueAtTime(0.06, t);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+    osc.frequency.exponentialRampToValueAtTime(38, t + 0.22);
+    gain.gain.setValueAtTime(0.07, t);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
     osc.connect(gain);
     gain.connect(this.master);
     osc.start();
-    osc.stop(t + 0.18);
+    osc.stop(t + 0.3);
   }
 
   hintAhead(): void {
@@ -314,9 +354,15 @@ export class AudioEngine {
     noise.buffer = buffer;
     const filter = this.ctx.createBiquadFilter();
     filter.type = surface === "wet" ? "bandpass" : "lowpass";
-    filter.frequency.value = surface === "concrete" ? 720 : surface === "wet" ? 980 : 420;
+    filter.frequency.value = this.inTunnel
+      ? 280
+      : surface === "concrete"
+        ? 720
+        : surface === "wet"
+          ? 980
+          : 420;
     const gain = this.ctx.createGain();
-    gain.gain.value = quiet ? 0.035 : surface === "wet" ? 0.1 : 0.085;
+    gain.gain.value = (quiet ? 0.035 : surface === "wet" ? 0.1 : 0.085) * (this.inTunnel ? 0.52 : 1);
     noise.connect(filter);
     filter.connect(gain);
     gain.connect(this.master);

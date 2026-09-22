@@ -18,6 +18,8 @@ test("HUD progress names DEPTH and the room vibe in Chinese", () => {
   assert.equal(roomVibeHud("maze_cubicles"), "隔间迷宫 · maze_cubicles");
   assert.equal(roomVibeHud("long_hall"), "长廊 · long_hall");
   assert.equal(roomVibeHud("poolcore"), "池核 · poolcore");
+  assert.equal(roomVibeHud("hotel_hall"), "酒店走廊 · hotel_hall");
+  assert.equal(roomVibeHud("empty_classroom"), "空教室 · empty_classroom");
   assert.ok(OPENING_HINT.includes("门"));
 });
 
@@ -28,8 +30,8 @@ test("room-entry fade is a short dark recover, not a strobe", () => {
     samples.push(enterFadeOpacity(fade));
     fade = Math.max(0, fade - (1 / 60) * 2.15);
   }
-  assert.ok(samples[0]! <= 0.62, `peak ${samples[0]} too opaque`);
-  assert.ok(samples[0]! >= 0.4, `peak ${samples[0]} too timid`);
+  assert.ok(samples[0]! <= 0.22, `peak ${samples[0]} is a wipe`);
+  assert.ok(samples[0]! >= 0.1, `peak ${samples[0]} too timid`);
   for (let i = 1; i < samples.length; i += 1) {
     assert.ok(samples[i]! <= samples[i - 1]! + 1e-9, "fade must be monotonic");
     assert.ok(Math.abs(samples[i]! - samples[i - 1]!) < 0.08, "frame step still a flash");

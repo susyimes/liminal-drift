@@ -35,10 +35,10 @@ export function doorGlitchOpacity(time: number): number {
   return 0.02 + Math.abs(Math.sin(time * 1.8 + 1.2)) * 0.03;
 }
 
-/** Door-pass overlay: dark → clear, quadratic ease, never a bright flash. */
+/** Landing recover: a light exposure dip, never a black wipe. */
 export function enterFadeOpacity(enterFade: number): number {
   const t = Math.min(1, Math.max(0, enterFade));
-  return t * t * 0.58;
+  return t * t * 0.16;
 }
 
 /** Exposure dip while crossing a jamb. Positive value is subtracted. */
@@ -82,21 +82,35 @@ export function tubeEmissiveHex(mood: LightingMood | string): number {
   return 0xfff1b0;
 }
 
-/** Tunnel tubes: slower and quieter than room flicker. Never a strobe. */
+/** Tunnel tubes after they settle — almost still, never a strobe. */
 export function tunnelTubeMul(time: number, phase: number): number {
-  return 0.96 + Math.sin(time * 0.85 + phase) * 0.03;
+  return 0.975 + Math.sin(time * 0.45 + phase) * 0.012;
 }
 
-/** Soft door-frame while walking a throat — readable, not a flash. */
+/**
+ * Two smooth dips in the first ~0.45s, then hold.
+ * Each dip is ~180ms so a frame never slams to black.
+ */
+export function tunnelStartupFlicker(elapsed: number): number {
+  const dip = (t: number, start: number): number => {
+    const u = (t - start) / 0.18;
+    if (u < 0 || u > 1) return 1;
+    const v = u < 0.5 ? u * 2 : (1 - u) * 2;
+    return 1 - v * 0.34;
+  };
+  return Math.min(dip(elapsed, 0.04), dip(elapsed, 0.28));
+}
+
+/** Side squeeze only — the player must still see the walk. */
 export function tunnelOverlayOpacity(progress: number, waiting: boolean): number {
   const p = Math.min(1, Math.max(0, progress));
-  const mid = 0.16 + Math.sin(p * Math.PI) * 0.08;
-  return waiting ? mid + 0.05 : mid;
+  const mid = 0.045 + Math.sin(p * Math.PI) * 0.03;
+  return waiting ? mid + 0.02 : mid;
 }
 
 export function tunnelFogHex(mood: TunnelMood | string): number {
   if (mood === "pool_pipe") return 0x1a4044;
-  if (mood === "damp_service") return 0x2a3228;
-  if (mood === "dark_throat") return 0x12161c;
-  return 0x6a5828;
+  if (mood === "damp_service") return 0x243830;
+  if (mood === "dark_throat") return 0x14181c;
+  return 0x2a3630;
 }
