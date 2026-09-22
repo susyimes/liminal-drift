@@ -6,9 +6,13 @@ import {
   type DriftProgress,
   type EncounterCard,
   type ExitCount,
+  type ExitLayout,
   type ExitOrientation,
   type LayoutMotif,
+  type LightingMode,
+  type LightingStyle,
   type RoomDecision,
+  type SoundBed,
 } from "./types.ts";
 
 type WallLike = "n" | "s" | "e" | "w";
@@ -129,33 +133,123 @@ export function orientationWalls(entry: WallLike, orientation: ExitOrientation):
   return [left, right, ahead];
 }
 
+export function layoutWalls(entry: WallLike, layout: ExitLayout): WallLike[] {
+  const ahead = oppositeWall(entry);
+  const left = rotateWallLike(entry, 1);
+  const right = rotateWallLike(entry, -1);
+  if (layout === "t_junction") return [left, right];
+  if (layout === "cross") return [ahead, left, right];
+  if (layout === "loop_side") return [ahead, left];
+  return [ahead, right];
+}
+
+export function countForLayout(layout: ExitLayout): ExitCount {
+  if (layout === "cross") return "three";
+  if (layout === "t_junction") return "two";
+  return "two";
+}
+
+export function orientationForLayout(layout: ExitLayout): ExitOrientation {
+  if (layout === "t_junction") return "split";
+  if (layout === "cross") return "split";
+  if (layout === "loop_side") return "left";
+  return "ahead";
+}
+
+export function lightingFromStyle(style: LightingStyle): LightingMode {
+  if (style === "flicker") return "flickering";
+  if (style === "half_dead") return "dim";
+  if (style === "almost_dark") return "dead";
+  return "harsh";
+}
+
+export function styleFromLighting(lighting: LightingMode): LightingStyle {
+  if (lighting === "flickering") return "flicker";
+  if (lighting === "dim") return "half_dead";
+  if (lighting === "dead") return "almost_dark";
+  return "steady_cool";
+}
+
+export function ambienceFromSoundBed(bed: SoundBed): "hum" | "drip" | "footsteps" | "silence" {
+  if (bed === "drip") return "drip";
+  if (bed === "distant_footsteps") return "footsteps";
+  if (bed === "silence_ring") return "silence";
+  return "hum";
+}
+
+export function soundBedFromAmbience(ambience: string): SoundBed {
+  if (ambience === "drip") return "drip";
+  if (ambience === "footsteps") return "distant_footsteps";
+  if (ambience === "silence") return "silence_ring";
+  return "hvac_hum";
+}
+
+/** Extra real mouths so "two exits" is never just a single ahead jamb. */
+export function fillOutgoingWalls(entry: WallLike, wanted: WallLike[], outgoing: number): WallLike[] {
+  if (outgoing <= 0) return [];
+  const ahead = oppositeWall(entry);
+  const left = rotateWallLike(entry, 1);
+  const right = rotateWallLike(entry, -1);
+  const filled = [...wanted];
+  for (const wall of [ahead, left, right]) {
+    if (filled.length >= outgoing) break;
+    if (!filled.includes(wall)) filled.push(wall);
+  }
+  return filled.slice(0, outgoing);
+}
+
 /** True dead-ends stay rare until the run is almost over. */
 export function allowIntentionalDeadEnd(depth: number): boolean {
   return depth >= WIN_DEPTH - 6;
 }
 
+/** Painted / loop throats can appear once the first rooms have taught the graph. */
+export function allowFakePath(depth: number): boolean {
+  return depth >= 2;
+}
+
 export function planDoorWalls(
   entryLocal: WallLike,
-  decision: Pick<RoomDecision, "roomArchetype" | "exitCount" | "exitOrientation" | "deadEndBait">,
-): { real: WallLike[]; fake: WallLike[] } {
+  decision: Pick<RoomDecision, "roomArchetype" | "exitCount" | "exitOrientation" | "deadEndBait"> & {
+    exitLayout?: ExitLayout;
+  },
+): { real: WallLike[]; fake: WallLike[]; bait?: WallLike; safer?: WallLike } {
   const archetype = decision.roomArchetype;
   if (archetype === "exit_foyer") {
-    return { real: [entryLocal, oppositeWall(entryLocal)], fake: [] };
+    const ahead = oppositeWall(entryLocal);
+    return { real: [entryLocal, ahead], fake: [], bait: ahead };
   }
   if (archetype === "dead_end") {
     const baitWalls = decision.deadEndBait ? orientationWalls(entryLocal, "ahead").slice(0, 1) : [];
-    return { real: [entryLocal], fake: baitWalls };
+    return { real: [entryLocal], fake: baitWalls, bait: baitWalls[0] };
   }
 
+  const layout = decision.exitLayout;
+  const fromLayout = layout ? layoutWalls(entryLocal, layout) : [];
   const outgoing = Math.min(archetype === "stairwell" ? 2 : 4, outgoingCount(decision.exitCount));
-  let wanted = orientationWalls(entryLocal, decision.exitOrientation).slice(0, outgoing);
+  let wanted =
+    fromLayout.length > 0
+      ? fillOutgoingWalls(entryLocal, fromLayout, Math.max(outgoing, fromLayout.length))
+      : fillOutgoingWalls(entryLocal, orientationWalls(entryLocal, decision.exitOrientation), outgoing);
   if (wanted.length === 0) wanted = [oppositeWall(entryLocal)];
-
-  // Bait may paint one throat. It must never delete the last real forward door.
-  if (decision.deadEndBait && wanted.length > 1) {
-    return { real: [entryLocal, ...wanted.slice(1)], fake: wanted.slice(0, 1) };
+  if (wanted.length < 2) {
+    wanted = fillOutgoingWalls(entryLocal, wanted, 2);
   }
-  return { real: [entryLocal, ...wanted], fake: [] };
+
+  const real = [entryLocal, ...wanted];
+  const used = new Set<WallLike>(real);
+  const free = (["n", "s", "e", "w"] as const).filter((wall) => !used.has(wall));
+  const fake: WallLike[] = [];
+  if (decision.deadEndBait && free.length > 0) {
+    // Additive fake path — never steal the last real outgoing.
+    const preferAhead = oppositeWall(entryLocal);
+    const painted = free.includes(preferAhead) ? preferAhead : free[0]!;
+    fake.push(painted);
+  }
+
+  const bait = fake[0] ?? wanted[0];
+  const safer = wanted.find((wall) => wall !== bait) ?? wanted[wanted.length - 1];
+  return { real, fake, bait, safer };
 }
 
 export function ensureTraversableDecision(decision: RoomDecision, depth: number): RoomDecision {
@@ -165,14 +259,13 @@ export function ensureTraversableDecision(decision: RoomDecision, depth: number)
     next.roomArchetype = "empty_office";
     next.exitCount = "two";
     next.exitOrientation = "ahead";
-    next.deadEndBait = false;
-    next.deadEndBaitNoul = Math.min(next.deadEndBaitNoul, 0.35);
+    next.exitLayout = next.exitLayout === "cross" ? "parallel_two" : next.exitLayout;
   }
   if (!late && next.exitOrientation === "behind_only") {
     next.exitOrientation = "ahead";
     if (next.exitCount === "one") next.exitCount = "two";
   }
-  if (!late) {
+  if (!allowFakePath(depth)) {
     next.deadEndBait = false;
     next.deadEndBaitNoul = Math.min(next.deadEndBaitNoul, 0.4);
   }
@@ -180,6 +273,32 @@ export function ensureTraversableDecision(decision: RoomDecision, depth: number)
     next.deadEndBait = false;
     next.exitOrientation = "ahead";
     next.exitCount = "one";
+    next.exitLayout = "parallel_two";
+  }
+  // Most chambers should branch. A single outgoing door feels like a portal swap.
+  if (
+    next.roomArchetype !== "dead_end" &&
+    next.roomArchetype !== "exit_foyer" &&
+    next.exitCount === "one"
+  ) {
+    next.exitCount = "two";
+    if (next.exitOrientation === "behind_only") next.exitOrientation = "ahead";
+  }
+  if (next.roomArchetype !== "dead_end" && next.roomArchetype !== "exit_foyer") {
+    const outgoing = outgoingCount(next.exitCount);
+    if (outgoing < 2) next.exitCount = "two";
+    if (outgoing > 4) next.exitCount = "four";
+  }
+  if (next.exitLayout === "cross") {
+    next.exitCount = "three";
+    next.exitOrientation = "split";
+  } else if (next.exitLayout === "t_junction") {
+    next.exitCount = "two";
+    next.exitOrientation = "split";
+  } else if (next.exitLayout === "loop_side") {
+    next.exitCount = next.exitCount === "one" ? "two" : next.exitCount;
+    if (next.exitOrientation === "behind_only") next.exitOrientation = "left";
+    if (next.layoutMotif === "open_floor") next.layoutMotif = "pillar_grid";
   }
   return next;
 }

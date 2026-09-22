@@ -6,6 +6,12 @@ export const ROOM_ARCHETYPES = [
   "stairwell",
   "dead_end",
   "exit_foyer",
+  "poolcore",
+  "hotel_hall",
+  "parking_ramp",
+  "machine_room",
+  "empty_classroom",
+  "unfinished",
 ] as const;
 export type RoomArchetype = (typeof ROOM_ARCHETYPES)[number];
 
@@ -15,7 +21,49 @@ export type RoomSize = (typeof ROOM_SIZES)[number];
 export const LIGHTING_MODES = ["flickering", "dim", "harsh", "dead"] as const;
 export type LightingMode = (typeof LIGHTING_MODES)[number];
 
-export const HAZARDS = ["none", "puddle_slip", "dark_patch", "buzzing_overload"] as const;
+export const LIGHTING_STYLES = ["steady_cool", "flicker", "half_dead", "almost_dark"] as const;
+export type LightingStyle = (typeof LIGHTING_STYLES)[number];
+
+export const LIGHTING_MOODS = ["sick_yellow", "humid_teal", "cold_service", "brownout"] as const;
+export type LightingMood = (typeof LIGHTING_MOODS)[number];
+
+export const TUNNEL_LENGTHS = ["short", "medium", "long"] as const;
+export type TunnelLength = (typeof TUNNEL_LENGTHS)[number];
+
+export const TUNNEL_MOODS = ["yellow_throat", "damp_service", "pool_pipe", "dark_throat"] as const;
+export type TunnelMood = (typeof TUNNEL_MOODS)[number];
+
+export const POOLCORE_VARIANTS = [
+  "none",
+  "shallow_puddle_hall",
+  "empty_pool_hall",
+  "locker_room",
+  "flooded_utility",
+] as const;
+export type PoolcoreVariant = (typeof POOLCORE_VARIANTS)[number];
+
+export const EXIT_LAYOUTS = ["parallel_two", "t_junction", "cross", "loop_side"] as const;
+export type ExitLayout = (typeof EXIT_LAYOUTS)[number];
+
+export const HUMIDITIES = ["dry", "damp", "heavy"] as const;
+export type Humidity = (typeof HUMIDITIES)[number];
+
+export const SOUND_BEDS = ["hvac_hum", "drip", "distant_footsteps", "silence_ring"] as const;
+export type SoundBed = (typeof SOUND_BEDS)[number];
+
+export const NARRATIVE_CRUMBS = ["none", "wrong_door_number", "wet_footprints", "unfinished_notice"] as const;
+export type NarrativeCrumb = (typeof NARRATIVE_CRUMBS)[number];
+
+export const HAZARDS = [
+  "none",
+  "puddle_slip",
+  "dark_patch",
+  "buzzing_overload",
+  "audio_lure",
+  "tracking_presence",
+  "environmental",
+  "low_entity",
+] as const;
 export type Hazard = (typeof HAZARDS)[number];
 
 export const LOOT_TYPES = ["none", "battery", "keycard", "note"] as const;
@@ -36,7 +84,17 @@ export type ExitCount = (typeof EXIT_COUNTS)[number];
 export const EXIT_ORIENTATIONS = ["ahead", "left", "right", "behind_only", "split"] as const;
 export type ExitOrientation = (typeof EXIT_ORIENTATIONS)[number];
 
-export const CLUE_BEATS = ["none", "note", "keycard", "false_exit", "graffiti", "radio_static"] as const;
+export const CLUE_BEATS = [
+  "none",
+  "note",
+  "keycard",
+  "false_exit",
+  "graffiti",
+  "radio_static",
+  "wrong_door_number",
+  "wet_footprints",
+  "unfinished_notice",
+] as const;
 export type ClueBeat = (typeof CLUE_BEATS)[number];
 
 export const ENTITY_BEHAVIORS = ["stalk", "ambush", "wander", "mimic_door", "absent"] as const;
@@ -133,10 +191,15 @@ export type CompactRoomMemory = {
   id: string;
   archetype: RoomArchetype;
   lighting: LightingMode;
+  lightingMood?: LightingMood;
+  lightingStyle?: LightingStyle;
   ambience: Ambience;
   hazard: Hazard;
   encounter?: EncounterCard;
   motif?: LayoutMotif;
+  poolcoreVariant?: PoolcoreVariant;
+  humidity?: Humidity;
+  exitLayout?: ExitLayout;
 };
 
 export type DriftProgress = {
@@ -180,6 +243,14 @@ export type RoomDecision = {
   roomArchetype: RoomArchetype;
   size: RoomSize;
   lighting: LightingMode;
+  lightingMood: LightingMood;
+  lightingStyle: LightingStyle;
+  poolcoreVariant: PoolcoreVariant;
+  humidity: Humidity;
+  soundBed: SoundBed;
+  narrativeCrumb: NarrativeCrumb;
+  exitLayout: ExitLayout;
+  familiarReturn: boolean;
   hazard: Hazard;
   loot: LootType;
   entityPresent: boolean;
@@ -200,6 +271,9 @@ export type RoomDecision = {
   soundBait: boolean;
   soundBaitNoul: number;
   entityAggression: number;
+  entityPressure: number;
+  tunnelLength: TunnelLength;
+  tunnelMood: TunnelMood;
 };
 
 export type EntityDecision = {

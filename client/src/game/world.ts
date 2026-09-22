@@ -15,7 +15,9 @@ import {
   doorFrameHex,
   doorGlitchOpacity,
   doorShimmerOpacity,
+  doorVeilHex,
   doorVeilOpacity,
+  lightHexForMood,
   startGuideMul,
   tubeFlickerMul,
 } from "./lighting.ts";
@@ -37,9 +39,31 @@ import {
   type Door,
   type Pickup,
 } from "./rooms.ts";
+import { inferTunnelMood, tunnelProgress, tunnelReachedExit } from "./transit.ts";
+import { buildTunnel, tintTunnelSpeck, updateTunnelLights, type BuiltTunnel } from "./tunnel.ts";
+import { tunnelLengthFor } from "./directorFeel.ts";
+
+export type PortalKind = "none" | "entered" | "waiting" | "exit" | "locked" | "fake" | "tunnel";
+
+export type PortalResult = {
+  kind: PortalKind;
+  room?: BuiltRoom;
+  tunnel?: BuiltTunnel;
+  waiting?: boolean;
+};
+
+export type Transit = {
+  tunnel: BuiltTunnel;
+  parent: BuiltRoom;
+  door: Door;
+  startedAt: number;
+  dest: BuiltRoom | null;
+};
 
 export class World {
   readonly rooms = new Map<string, BuiltRoom>();
+  readonly tunnels: BuiltTunnel[] = [];
+  transit: Transit | null = null;
   readonly log: RoomLogEntry[] = [];
   currentId = "start";
   roomsVisited = 1;
@@ -88,6 +112,9 @@ export class World {
     for (const room of this.rooms.values()) {
       if (dist2(x, z, room.cx, room.cz) < 40 * 40) out.push(...room.colliders);
     }
+    for (const tunnel of this.tunnels) {
+      if (dist2(x, z, tunnel.cx, tunnel.cz) < 40 * 40) out.push(...tunnel.colliders);
+    }
     return out;
   }
 
@@ -98,7 +125,9 @@ export class World {
         const sealExit = door.isExit;
         const sealFake = door.fake || door.isFalseExit;
         const sealLocked = door.locked;
-        const sealPending = !door.connectedRoomId && door.generation !== "ready" && !door.isExit && !door.fake;
+        const inThisTransit = this.transit?.door.id === door.id;
+        const sealPending =
+          !door.connectedRoomId && door.generation !== "ready" && !door.isExit && !door.fake && !inThisTransit;
         if (!sealExit && !sealPending && !sealFake && !sealLocked) continue;
         const pos = doorWorldPos(room, door);
         const out = doorOutward(room, door);
@@ -242,7 +271,9 @@ export class World {
           here,
         });
         entry.light.intensity = entry.base * flicker;
-        entry.light.color.setHex(here ? 0xfff1b0 : 0x8fa0b4);
+        const mood =
+          room.archetype === "poolcore" ? "humid_teal" : room.decision.lightingMood ?? "sick_yellow";
+        entry.light.color.setHex(lightHexForMood(mood, here));
         const tube = entry.tube.material;
         if (tube instanceof THREE.MeshStandardMaterial && tube.emissiveIntensity !== undefined) {
           tube.emissiveIntensity = 0.55 + flicker * 0.7;
@@ -264,8 +295,11 @@ export class World {
         const markable = !door.fake && !door.isFalseExit && !door.isExit && !door.locked;
         const veilOpacity = markable ? doorVeilOpacity(connected) : 0;
         if (door.veil.visible !== veilOpacity > 0) door.veil.visible = veilOpacity > 0;
-        (door.veil.material as THREE.MeshBasicMaterial).opacity = veilOpacity;
+        const veilMat = door.veil.material as THREE.MeshBasicMaterial;
+        veilMat.opacity = veilOpacity;
         if (markable) {
+          const veilHex = doorVeilHex(connected);
+          if (veilMat.color.getHex() !== veilHex) veilMat.color.setHex(veilHex);
           const hex = doorFrameHex(connected);
           for (const frame of door.frames) {
             const mat = frame.material as THREE.MeshStandardMaterial;
@@ -277,6 +311,15 @@ export class World {
         const stillOpen = room.doors.some((door) => !door.connectedRoomId && !door.fake && !door.isFalseExit);
         room.guideLight.visible = here && stillOpen;
         room.guideLight.intensity = stillOpen ? room.guideBase * startGuideMul(time) : 0;
+      }
+    }
+    for (const tunnel of this.tunnels) updateTunnelLights(tunnel, time, performance.now());
+    for (const room of this.rooms.values()) {
+      for (const puddle of room.puddles) {
+        const mat = puddle.material;
+        if (mat instanceof THREE.MeshStandardMaterial) {
+          mat.opacity = 0.34 + Math.sin(time * 0.55 + puddle.position.x) * 0.04;
+        }
       }
     }
   }
@@ -301,11 +344,7 @@ export class World {
     }
   }
 
-  tryEnter(px: number, pz: number, compact: CompactGameState): {
-    kind: "none" | "entered" | "waiting" | "exit" | "locked" | "fake";
-    room?: BuiltRoom;
-    waiting?: boolean;
-  } {
+  tryEnter(px: number, pz: number, compact: CompactGameState): PortalResult {
     const global = this.nearestDoor(px, pz);
     const local = this.nearestDoorIn(this.current, px, pz);
     const hit =
@@ -348,37 +387,18 @@ export class World {
       this.finishWithFallback(room, door, compact, "Generation timed out — using fallback.");
     }
 
-    if (door.decision) {
-      try {
-        const spawned = this.spawnFrom(room, door, door.decision, this.lastSource, this.lastLatency);
-        return { kind: "entered", room: spawned ?? undefined };
-      } catch {
-        try {
-          const fallback = fallbackRoomDecision(
-            { ...compact, purpose: "room", portal: { id: door.id, fromArchetype: room.archetype, direction: door.worldWall } },
-            door.id,
-          );
-          const spawned = this.spawnFrom(room, door, fallback, "fallback", this.lastLatency);
-          return { kind: "entered", room: spawned ?? undefined };
-        } catch {
-          return { kind: "waiting", waiting: true };
-        }
-      }
+    if (this.transit && this.transit.door.id === door.id) {
+      return { kind: "tunnel", tunnel: this.transit.tunnel };
     }
 
-    if (doorAwaitingDecision(door) || door.generation === "idle") {
-      door.generation = "pending";
-      door.pendingSince = performance.now();
-      this.prefetch(room, door, compact);
+    if (door.decision || doorAwaitingDecision(door) || door.generation === "idle" || door.generation === "pending") {
+      return this.beginTransit(room, door, compact);
     }
     return { kind: "waiting", waiting: true };
   }
 
   /** If the player walked through a ready jamb into the void, still spawn. */
-  rescueOutside(px: number, pz: number, compact: CompactGameState): {
-    kind: "none" | "entered" | "waiting";
-    room?: BuiltRoom;
-  } {
+  rescueOutside(px: number, pz: number, compact: CompactGameState): PortalResult {
     const hit = this.nearestDoor(px, pz);
     if (!hit || hit.dist > 2.4) return { kind: "none" };
     const { room, door } = hit;
@@ -396,12 +416,160 @@ export class World {
     if (doorNeedsForcedFallback(door, performance.now(), ROOM_PREFETCH_TIMEOUT_MS) || !door.decision) {
       this.finishWithFallback(room, door, compact, "Generation timed out — using fallback.");
     }
-    if (!door.decision) return { kind: "waiting" };
+    if (this.transit && this.transit.door.id === door.id) {
+      return { kind: "tunnel", tunnel: this.transit.tunnel };
+    }
+    return this.beginTransit(room, door, compact);
+  }
+
+  beginTransit(parent: BuiltRoom, door: Door, compact: CompactGameState): PortalResult {
+    if (door.connectedRoomId) {
+      this.currentId = door.connectedRoomId;
+      return { kind: "entered", room: this.rooms.get(door.connectedRoomId) };
+    }
+    if (this.transit && this.transit.door.id === door.id) {
+      return { kind: "tunnel", tunnel: this.transit.tunnel };
+    }
+
+    if (doorAwaitingDecision(door) || door.generation === "idle") {
+      door.generation = "pending";
+      door.pendingSince = performance.now();
+      this.prefetch(parent, door, compact);
+    } else if (door.generation === "pending" && !door.decision) {
+      if (doorNeedsForcedFallback(door, performance.now(), ROOM_PREFETCH_TIMEOUT_MS)) {
+        this.finishWithFallback(parent, door, compact, "Generation timed out — using fallback.");
+      }
+    }
+
+    const existing = this.tunnels.find((item) => item.parentDoorId === door.id);
+    const length = tunnelLengthFor(door.decision?.roomArchetype, door.decision?.tunnelLength);
+    const mood =
+      door.decision?.tunnelMood ??
+      inferTunnelMood(parent.archetype, door.decision?.roomArchetype ?? null);
+    const tunnel =
+      existing ??
+      buildTunnel({
+        id: `t-${door.id}`,
+        parent,
+        door,
+        length,
+        mood,
+        destArchetype: door.decision?.roomArchetype ?? null,
+      });
+    if (!existing) {
+      this.tunnels.push(tunnel);
+      this.scene.add(tunnel.group);
+    }
+    tunnel.litAt = performance.now();
+    tintTunnelSpeck(tunnel, door.decision?.roomArchetype, door.decision?.lightingMood ?? mood);
+    this.transit = {
+      tunnel,
+      parent,
+      door,
+      startedAt: performance.now(),
+      dest: null,
+    };
+    return { kind: "tunnel", tunnel };
+  }
+
+  advanceTransit(px: number, pz: number, compact: CompactGameState): PortalResult {
+    const active = this.transit;
+    if (!active) return { kind: "none" };
+
+    if (!active.door.decision) {
+      const waited = performance.now() - active.startedAt;
+      if (doorNeedsForcedFallback(active.door, performance.now(), ROOM_PREFETCH_TIMEOUT_MS) || waited > 1400) {
+        this.finishWithFallback(active.parent, active.door, compact, "Generation timed out — using fallback.");
+      } else if (active.door.generation !== "pending") {
+        active.door.generation = "pending";
+        active.door.pendingSince = active.startedAt;
+        this.prefetch(active.parent, active.door, compact);
+      }
+    }
+
+    const atExit = tunnelReachedExit(active.tunnel, px, pz);
+    const backInParent = pickContainedRoom([active.parent], active.parent.id, px, pz, -0.2);
+    if (backInParent && tunnelProgress(active.tunnel, px, pz) < 0.1) {
+      this.transit = null;
+      return { kind: "none" };
+    }
+    if (active.door.decision) {
+      tintTunnelSpeck(
+        active.tunnel,
+        active.door.decision.roomArchetype,
+        active.door.decision.lightingMood ?? active.tunnel.mood,
+      );
+    }
+    if (!atExit) {
+      if (active.door.generation === "pending" && !active.door.decision) {
+        return { kind: "tunnel", tunnel: active.tunnel, waiting: true };
+      }
+      return { kind: "tunnel", tunnel: active.tunnel };
+    }
+
+    const dest = this.ensureTransitDestination(compact);
+    if (!dest) return { kind: "waiting", waiting: true, tunnel: active.tunnel };
+    this.transit = null;
+    active.tunnel.farVeil.visible = false;
+    this.currentId = dest.id;
+    return { kind: "entered", room: dest };
+  }
+
+  forceCompleteTransit(compact: CompactGameState): BuiltRoom | null {
+    if (!this.transit) return null;
+    const dest = this.ensureTransitDestination(compact);
+    if (dest) {
+      this.transit.tunnel.farVeil.visible = false;
+      this.transit = null;
+      this.currentId = dest.id;
+    }
+    return dest;
+  }
+
+  detachFromScene(): void {
+    for (const room of this.rooms.values()) this.scene.remove(room.group);
+    for (const tunnel of this.tunnels) this.scene.remove(tunnel.group);
+  }
+
+  private ensureTransitDestination(compact: CompactGameState): BuiltRoom | null {
+    const active = this.transit;
+    if (!active) return null;
+    if (active.dest) return active.dest;
+    if (active.door.connectedRoomId) {
+      const already = this.rooms.get(active.door.connectedRoomId);
+      if (already) {
+        active.dest = already;
+        return already;
+      }
+    }
+    if (!active.door.decision) {
+      this.finishWithFallback(active.parent, active.door, compact, "Generation timed out — using fallback.");
+    }
+    const decision = active.door.decision;
+    if (!decision) return null;
     try {
-      const spawned = this.spawnFrom(room, door, door.decision, this.lastSource, this.lastLatency);
-      return { kind: "entered", room: spawned ?? undefined };
+      const spawned = this.spawnFrom(
+        active.parent,
+        active.door,
+        decision,
+        this.lastSource,
+        this.lastLatency,
+        active.tunnel.length,
+      );
+      active.dest = spawned;
+      return spawned;
     } catch {
-      return { kind: "waiting" };
+      const fallback = fallbackRoomDecision(
+        {
+          ...compact,
+          purpose: "room",
+          portal: { id: active.door.id, fromArchetype: active.parent.archetype, direction: active.door.worldWall },
+        },
+        active.door.id,
+      );
+      const spawned = this.spawnFrom(active.parent, active.door, fallback, "fallback", this.lastLatency, active.tunnel.length);
+      active.dest = spawned;
+      return spawned;
     }
   }
 
@@ -476,10 +644,12 @@ export class World {
     decision: RoomDecision,
     source: GenerationSource,
     latencyMs: number,
+    extraGap = 0,
   ): BuiltRoom | null {
     const probe = doorWorldPos(parent, parentDoor);
     const out = doorOutward(parent, parentDoor);
-    const look = { x: probe.x + out.x * 2.2, z: probe.z + out.z * 2.2 };
+    const lookDist = extraGap > 0.5 ? extraGap + 1.1 : 2.2;
+    const look = { x: probe.x + out.x * lookDist, z: probe.z + out.z * lookDist };
     const existing = this.roomAt(look.x, look.z);
     if (existing && existing.id !== parent.id) {
       parentDoor.connectedRoomId = existing.id;
@@ -489,7 +659,7 @@ export class World {
       return existing;
     }
 
-    let place = placeAgainstDoor(parent, parentDoor, decision);
+    let place = placeAgainstDoor(parent, parentDoor, decision, extraGap);
     const measure = sizeOf(decision.roomArchetype, decision.size);
     let guard = 0;
     while (guard < 5) {

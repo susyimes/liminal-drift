@@ -32,15 +32,21 @@ export function buildRoomQuestions(state: CompactGameState): JevQuestions {
   const questions: JevQuestions = {
     room_archetype: {
       type: "choice",
-      instructions: `Director: pick the next Backrooms chamber. ${snap}. Avoid repeating the last two of [${recent}]. exit_foyer stays rare unless exitChance is high and depth>=7. dead_end is a sudden stop, not a joke. Prefer long_hall / maze_cubicles often enough that the building feels endless.`,
+      instructions: `Director: pick the next Backrooms chamber. ${snap}. Avoid repeating the last two of [${recent}] unless familiar_return is the point (same KIND, new id). exit_foyer stays rare unless exitChance is high and depth>=7. dead_end is a sudden stop, not a joke. Prefer junctions (hotel_hall / long_hall / maze_cubicles / poolcore) so the building is a graph, not a portal. Mix poolcore (池核) as a real Level-adjacent vibe.`,
       criteria: {
-        empty_office: "Yellow office, wet carpet, a few tired desks",
+        empty_office: "Dead office — yellow, wet carpet, a few tired desks",
         long_hall: "Fluorescent corridor that lasts too long",
         flooded_lobby: "Wide lobby, standing water, columns",
         maze_cubicles: "Cubicle warren that folds on itself",
         stairwell: "Concrete landing that does not connect correctly",
         dead_end: "Small stained room; only the way you came is real",
         exit_foyer: "Rare cooler foyer with a possible exit — almost never before depth 8 unless exitChance>0.6",
+        poolcore: "池核 hall — wet pale/cyan tile, empty or flooded basin, humid teal, emptiness first",
+        hotel_hall: "Hotel corridor: numbered doors, patterned carpet, one ajar utility",
+        parking_ramp: "Concrete parking ramp, yellow lines, cold service light",
+        machine_room: "Pipes, tanks, a machine room that hums at the wrong frequency",
+        empty_classroom: "Empty classroom, desks still in rows, no students",
+        unfinished: "Drywall, studs, plastic sheet — a floor that was never opened",
       },
     },
     size: {
@@ -54,22 +60,94 @@ export function buildRoomQuestions(state: CompactGameState): JevQuestions {
     },
     lighting: {
       type: "choice",
-      instructions: `Fluorescent hierarchy for this room. Current lighting=${state.currentRoom?.lighting ?? "unknown"}, sanity=${Math.round(state.player.sanity)}, battery=${state.player.battery}. Dead/dim punish a dying lamp. Harsh is the classic sick yellow. Flicker if the last rooms were too stable.`,
+      instructions: `Legacy flicker/dim knob. Prefer lighting_style when in doubt. Current lighting=${state.currentRoom?.lighting ?? "unknown"}.`,
       criteria: {
-        flickering: "Tubes strobe and buzz; hierarchy keeps collapsing",
+        flickering: "Tubes breathe; never a strobe",
         dim: "Most lamps dead; flashlight is the key light",
-        harsh: "Overbright yellow, hard shadows, no comfort",
-        dead: "Almost no fixtures; black eats the edges",
+        harsh: "Steady overbright, hard shadows",
+        dead: "Almost no fixtures; exit glow only",
+      },
+    },
+    lighting_style: {
+      type: "choice",
+      instructions: `Screenwriter lighting for this room (anti-strobe). Current=${state.currentRoom?.lightingStyle ?? state.currentRoom?.lighting ?? "unknown"}, battery=${state.player.battery}. flicker is 1–2 recoveries then stable, not a disco. almost_dark keeps a door-seam glow.`,
+      criteria: {
+        steady_cool: "Cool white/green, stable",
+        flicker: "One or two dips, then the tubes hold",
+        half_dead: "A row with dead sections; some housings dark",
+        almost_dark: "Nearly dark; only exit glow / flashlight",
       },
     },
     hazard: {
       type: "choice",
-      instructions: `Local trap. Prefer none before depth 3 (depth=${state.depth}). If lastEncounter=${progress.lastEncounter} already flooded or flickered, do not stack the same pressure.`,
+      instructions: `Local trap. Prefer none before depth 3 (depth=${state.depth}). Emptiness first — do not stack jump-scare entities. If lastEncounter=${progress.lastEncounter} already flooded or flickered, do not stack the same pressure.`,
       criteria: {
         none: "No extra trap",
         puddle_slip: "Slick water steals footing",
         dark_patch: "A lightless pocket that drains sanity",
         buzzing_overload: "Lights scream and raise noise for the entity",
+        audio_lure: "A false wet step / drip pulls them off the safe line",
+        tracking_presence: "Unseen thing using the graph; body stays out of frame",
+        environmental: "Deep puddle / slip / wet floor — the room is the hazard",
+        low_entity: "Almost no creature pressure; emptiness is the beat",
+      },
+    },
+    poolcore_variant: {
+      type: "choice",
+      instructions: `If this is a poolcore / wet-tile space, which 池核 cut? Use none for dry rooms. here=${state.currentRoom?.archetype ?? "void"}.`,
+      criteria: {
+        none: "Not a poolcore cut",
+        shallow_puddle_hall: "Long tiled hall, ankle puddles, reflected tubes",
+        empty_pool_hall: "Drained basin, cracks, a dark drain",
+        locker_room: "Benches, empty lockers, wet tile, no bodies",
+        flooded_utility: "Pipes, standing water, a service wet room",
+      },
+    },
+    humidity: {
+      type: "choice",
+      instructions: `Air wetness / fog. poolcore leans damp or heavy. Current=${state.currentRoom?.humidity ?? "dry"}.`,
+      criteria: {
+        dry: "Carpet dust, no haze",
+        damp: "Medium fog, condensation, farther walls blur",
+        heavy: "Wet air; poolcore default — distant lights smear",
+      },
+    },
+    sound_bed: {
+      type: "choice",
+      instructions: `Dominant bed. Last ambience=${state.currentRoom?.ambience ?? "unknown"}. Emptiness first: drip and silence_ring over monster cues.`,
+      criteria: {
+        hvac_hum: "HVAC / fluorescent 60Hz",
+        drip: "Distant drip you cannot place",
+        distant_footsteps: "Wet steps that are not yours",
+        silence_ring: "Wrong quiet; ears ring",
+      },
+    },
+    narrative_crumb: {
+      type: "choice",
+      instructions: `Optional story stain. lastClue=${progress.lastClue}. Do not repeat the last crumb.`,
+      criteria: {
+        none: "No extra writing",
+        wrong_door_number: "A room number that does not belong",
+        wet_footprints: "Prints that stop in the middle of the floor",
+        unfinished_notice: "A paper that says the floor was never opened",
+      },
+    },
+    exit_layout: {
+      type: "choice",
+      instructions: `Graph primitive for this chamber. Depth ${state.depth}. Prefer T / two-parallel / loop+side so it is not one portal. Cross is every wall a mouth. On enter, one exit is bait-bright; a safer exit can be dimmer/side.`,
+      criteria: {
+        parallel_two: "Two real ways on — ahead plus a side, or two parallels",
+        t_junction: "T: left and right; ahead may be a fake painted hall",
+        cross: "Four-way crossing",
+        loop_side: "Ring around a pillar plus a side door",
+      },
+    },
+    familiar_return: {
+      type: "noul",
+      instructions: `~30% of the time, return to a SAME KIND the wanderer already saw (new id, different stain). Recent=[${recent}]. False if recent is empty or you want a new kind.`,
+      criteria: {
+        true: "Same-kind familiar return, new room id",
+        false: "A kind they have not just been living in",
       },
     },
     layout_motif: {
@@ -83,13 +161,23 @@ export function buildRoomQuestions(state: CompactGameState): JevQuestions {
         narrow_throat: "A choke just after the door, then a wider gut",
       },
     },
+    lighting_mood: {
+      type: "choice",
+      instructions: `Color grade of the fixtures (separate from flicker/dim). Current mood=${state.currentRoom?.lightingMood ?? "sick_yellow"}, here=${state.currentRoom?.archetype ?? "void"}. poolcore should usually be humid_teal. yellow offices stay sick_yellow. Do not brownout every late room.`,
+      criteria: {
+        sick_yellow: "Classic Level-0 bile fluorescent",
+        humid_teal: "Cool cyan/teal poolcore wet light",
+        cold_service: "White-blue service corridor, no comfort",
+        brownout: "Undervolt amber, almost dying",
+      },
+    },
     exit_count: {
       type: "choice",
-      instructions: `How many REAL outgoing passages besides the entry? Depth ${state.depth}. One keeps the graph linear. Four is rare and should feel wrong. dead_end archetype should be one. Do not open a maze of doors every time.`,
+      instructions: `How many REAL outgoing passages besides the entry? Depth ${state.depth}. Target 2–4. Prefer two or three so the graph is Backrooms (junctions, return paths), not one-door teleports. One is for dead_end / a rare choke.`,
       criteria: {
-        one: "A single real way onward",
-        two: "A binary choice",
-        three: "A small junction",
+        one: "A single real way onward — use sparingly",
+        two: "A binary choice / hall with a side throat",
+        three: "A small junction — default Backrooms feel",
         four: "Every wall offers a mouth — use sparingly",
       },
     },
@@ -106,7 +194,7 @@ export function buildRoomQuestions(state: CompactGameState): JevQuestions {
     },
     dead_end_bait: {
       type: "noul",
-      instructions: `Should extra doorframes be FAKE — painted halls / sealed throats that look like progress? Use more when the player has been moving confidently (moving=${state.player.moving}, quietRooms=${progress.roomsSinceEntity}) and depth>=3. Almost never on a true exit_foyer.`,
+      instructions: `Add ONE fake path (dead end / painted hall / loop) IN ADDITION to the real exits when a wall is free. Depth ${state.depth}. Prefer true from depth 2, especially on T junctions (fake the obvious ahead). Never steal the last real door. Almost never on a true exit_foyer.`,
       criteria: {
         true: "Bait frames exist; they do not generate rooms",
         false: "Every visible door that isn't locked is a real graph edge",
@@ -211,6 +299,35 @@ export function buildRoomQuestions(state: CompactGameState): JevQuestions {
         "The space wants them gone",
         "Breaking — sensory collapse",
       ],
+    },
+    entity_pressure: {
+      type: "score",
+      instructions: `How hunted should THIS space feel, even before the body is seen? ${snap}. Higher after quietRooms>=3, if noisy, or if known and hops<=2. Lower in the first rooms. Stacks with entity_present but does not force a spawn.`,
+      criteria: [
+        "Empty pressure; the building is the threat",
+        "Watched, but maybe just pipes",
+        "Something is using the doors",
+        "It is already in the graph with them",
+      ],
+    },
+    tunnel_length: {
+      type: "choice",
+      instructions: `Walkable connecting throat. Duration is always 0.8–1.4s (not a cutscene, not instant). Length only changes how compressed the fluorescents feel. Depth ${state.depth}.`,
+      criteria: {
+        short: "Tight 0.8s throat — walls already close",
+        medium: "Default ~1.1s semi-enclosed hall",
+        long: "1.4s max; still walking, never a scene",
+      },
+    },
+    tunnel_mood: {
+      type: "choice",
+      instructions: `What is that connecting throat made of? From=${state.currentRoom?.archetype ?? "void"} / mood=${state.currentRoom?.lightingMood ?? "?"}. poolcore destinations or flooded rooms should prefer pool_pipe or damp_service. yellow_throat is Level-0 wallpaper. dark_throat is underlit concrete.`,
+      criteria: {
+        yellow_throat: "Yellow wallpaper, stained carpet, 60Hz",
+        damp_service: "Peeling service hall, wet concrete",
+        pool_pipe: "Cyan tile pipe / poolcore connector",
+        dark_throat: "Almost unlit throat; lamp is the key",
+      },
     },
   };
 

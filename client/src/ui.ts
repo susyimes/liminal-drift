@@ -76,7 +76,7 @@ export class Ui {
     el<HTMLElement>("over-lead").textContent = lead;
     const lines = log.map((entry) => {
       const d = entry.decision;
-      return `#${entry.depth} ${entry.source}  ${d.roomArchetype} · ${d.layoutMotif} · ${d.lighting} · ${d.ambience} · ${d.encounterCard} · ${d.entityBehavior} · clue ${d.clueBeat} · exitΔ ${d.advancesExit ? "yes" : "no"}  (${entry.latencyMs}ms)`;
+      return `#${entry.depth} ${entry.source}  ${d.roomArchetype}/${d.poolcoreVariant} · ${d.exitLayout} · ${d.lightingStyle}/${d.lightingMood} · ${d.humidity}/${d.soundBed} · ${d.hazard} · tunnel ${d.tunnelLength}/${d.tunnelMood} · crumb ${d.narrativeCrumb} · familiar ${d.familiarReturn ? "yes" : "no"}  (${entry.latencyMs}ms)`;
     });
     lines.push("", `Generation: ${jev} jev / ${fallback} fallback`, "What Jev (or the fallback director) chose.");
     el<HTMLElement>("over-log").textContent = lines.join("\n");

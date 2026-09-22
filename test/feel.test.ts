@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { OPENING_HINT, depthHudText, roomVibeHud, roomVibeZh } from "../client/src/game/copy.ts";
+import { OPENING_HINT, depthHudText, hudVibeArchetype, roomVibeHud, roomVibeZh } from "../client/src/game/copy.ts";
 import {
   doorFrameHex,
+  doorVeilHex,
   doorVeilOpacity,
   enterExposureDip,
   enterFadeOpacity,
@@ -17,6 +18,9 @@ test("HUD progress names DEPTH and the room vibe in Chinese", () => {
   assert.equal(roomVibeZh("stairwell"), "楼梯间");
   assert.equal(roomVibeHud("maze_cubicles"), "隔间迷宫 · maze_cubicles");
   assert.equal(roomVibeHud("long_hall"), "长廊 · long_hall");
+  assert.equal(roomVibeHud("poolcore"), "池核 · poolcore");
+  assert.equal(roomVibeHud("hotel_hall"), "酒店走廊 · hotel_hall");
+  assert.equal(roomVibeHud("empty_classroom"), "空教室 · empty_classroom");
   assert.ok(OPENING_HINT.includes("门"));
 });
 
@@ -27,8 +31,8 @@ test("room-entry fade is a short dark recover, not a strobe", () => {
     samples.push(enterFadeOpacity(fade));
     fade = Math.max(0, fade - (1 / 60) * 2.15);
   }
-  assert.ok(samples[0]! <= 0.62, `peak ${samples[0]} too opaque`);
-  assert.ok(samples[0]! >= 0.4, `peak ${samples[0]} too timid`);
+  assert.ok(samples[0]! <= 0.22, `peak ${samples[0]} is a wipe`);
+  assert.ok(samples[0]! >= 0.1, `peak ${samples[0]} too timid`);
   for (let i = 1; i < samples.length; i += 1) {
     assert.ok(samples[i]! <= samples[i - 1]! + 1e-9, "fade must be monotonic");
     assert.ok(Math.abs(samples[i]! - samples[i - 1]!) < 0.08, "frame step still a flash");
@@ -40,9 +44,19 @@ test("room-entry fade is a short dark recover, not a strobe", () => {
 });
 
 test("unexplored doors stay marked; explored doors stay open", () => {
-  assert.ok(doorVeilOpacity(false) > 0.05);
+  assert.ok(doorVeilOpacity(false) >= 0.28);
   assert.equal(doorVeilOpacity(true), 0);
   assert.notEqual(doorFrameHex(false), doorFrameHex(true));
+  assert.ok(((doorFrameHex(false) >> 16) & 0xff) - ((doorFrameHex(true) >> 16) & 0xff) > 80);
+  assert.ok(((doorVeilHex(false) >> 16) & 0xff) > 180);
+});
+
+test("HUD vibe prefers the room just entered over a jamb-overlap currentId", () => {
+  assert.equal(hudVibeArchetype("maze_cubicles", "long_hall", "long_hall"), "maze_cubicles");
+  assert.equal(hudVibeArchetype(null, "long_hall", "empty_office"), "long_hall");
+  assert.equal(hudVibeArchetype(null, null, "empty_office"), "empty_office");
+  assert.equal(roomVibeHud("maze_cubicles"), "隔间迷宫 · maze_cubicles");
+  assert.notEqual(roomVibeHud("maze_cubicles"), roomVibeHud("long_hall"));
 });
 
 test("start-room guide lamp breathes slowly", () => {

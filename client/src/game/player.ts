@@ -3,6 +3,21 @@ import { clamp, circleHitsAabb, firstFreePoint, pointInAabb } from "./math.ts";
 import { tex } from "./textures.ts";
 import { walkIntent, type Input } from "../input.ts";
 import type { World } from "./world.ts";
+import { EYE_YELLOW } from "./directorFeel.ts";
+
+export type FeelOpts = {
+  locked?: boolean;
+  speedEase?: number;
+  strafeMul?: number;
+  eyeY?: number;
+  pitchAdd?: number;
+  yawAdd?: number;
+  fov?: number | null;
+  bobMul?: number;
+  shakeMul?: number;
+  smear?: number;
+  beamMul?: number;
+};
 
 export class Player {
   x = 0;
@@ -28,6 +43,7 @@ export class Player {
   readonly flashFill: THREE.SpotLight;
   readonly flashTarget: THREE.Object3D;
   readonly beam: THREE.Mesh;
+  readonly smear: THREE.Mesh;
 
   constructor(camera: THREE.PerspectiveCamera) {
     this.camera = camera;
@@ -56,6 +72,34 @@ export class Player {
     this.beam.rotation.x = -Math.PI / 2;
     this.beam.position.set(0.12, -0.14, -4.6);
     camera.add(this.beam);
+
+    const smearCanvas = document.createElement("canvas");
+    smearCanvas.width = 64;
+    smearCanvas.height = 256;
+    const sctx = smearCanvas.getContext("2d");
+    if (sctx) {
+      const grad = sctx.createLinearGradient(0, 0, 0, 256);
+      grad.addColorStop(0, "rgba(214, 226, 222, 0)");
+      grad.addColorStop(0.5, "rgba(214, 226, 222, 0.4)");
+      grad.addColorStop(1, "rgba(214, 226, 222, 0)");
+      sctx.fillStyle = grad;
+      sctx.fillRect(28, 0, 8, 256);
+    }
+    const smearTex = new THREE.CanvasTexture(smearCanvas);
+    this.smear = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.55, 1.35),
+      new THREE.MeshBasicMaterial({
+        map: smearTex,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        fog: false,
+      }),
+    );
+    this.smear.position.set(0, -0.08, -0.72);
+    this.smear.renderOrder = 8;
+    camera.add(this.smear);
   }
 
   applyLook(dx: number, dy: number): void {
@@ -74,13 +118,16 @@ export class Player {
     this.z = spot.z;
   }
 
-  update(dt: number, input: Input, world: World): void {
+  update(dt: number, input: Input, world: World, feel: FeelOpts = {}): void {
+    const locked = Boolean(feel.locked);
+    const lookMul = locked ? 0.12 : 1;
     const look = input.consumeLook();
-    this.applyLook(look.x, look.y);
+    this.applyLook(look.x * lookMul, look.y * lookMul);
     this.sneak = input.sneaking;
+    this.y = feel.eyeY ?? EYE_YELLOW;
 
     const wish = walkIntent(input.keys, input.stickX, input.stickY);
-    let ix = wish.x;
+    let ix = wish.x * (feel.strafeMul ?? 1);
     let iz = wish.z;
     const mag = Math.hypot(ix, iz);
     if (mag > 1) {
@@ -89,8 +136,11 @@ export class Player {
     }
 
     this.speedMul = world.current.water && world.current.decision.encounterCard === "flooded_slow_zone" ? 0.62 : 1;
-    const slip = world.current.water && !this.sneak && Math.random() < dt * 0.7 ? 1.8 : 1;
-    const speed = (this.sneak ? 1.35 : 3.05) * this.speedMul;
+    const slipHazard =
+      world.current.decision.hazard === "environmental" || world.current.decision.hazard === "puddle_slip";
+    const slip = (world.current.water || slipHazard) && !this.sneak && Math.random() < dt * 0.7 ? 1.8 : 1;
+    const ease = locked ? 0 : (feel.speedEase ?? 1);
+    const speed = (this.sneak ? 1.35 : 3.05) * this.speedMul * ease;
     const sin = Math.sin(this.yaw);
     const cos = Math.cos(this.yaw);
     const wishX = (ix * cos - iz * sin) * speed * dt * slip;
@@ -103,7 +153,7 @@ export class Player {
     if (this.blocked(world, nx, nz)) nz = this.z;
     this.x = nx;
     this.z = nz;
-    this.moving = mag > 0.08;
+    this.moving = !locked && mag > 0.08;
     this.noise = this.moving ? (this.sneak ? 0.18 : 0.62) : 0.08;
     if (world.current.decision.hazard === "buzzing_overload") this.noise = Math.min(1, this.noise + 0.25);
 
@@ -112,25 +162,33 @@ export class Player {
     const drain = 3.2 + world.current.decision.fearIntensity * 1.15;
     if (this.flashlightOn) this.battery = Math.max(0, this.battery - dt * drain);
 
-    this.bob += dt * (this.moving ? (this.sneak ? 6.2 : 9.4) : 0);
-    const bobAmt = this.moving ? (this.sneak ? 0.012 : 0.034) : 0;
+    const bobMul = feel.bobMul ?? 1;
+    this.bob += dt * (this.moving ? (this.sneak ? 6.2 : 9.4) * bobMul : 0);
+    const bobAmt = this.moving ? (this.sneak ? 0.012 : 0.034) * bobMul : 0;
     const bobY = Math.sin(this.bob) * bobAmt;
     const bobX = Math.cos(this.bob * 0.5) * bobAmt * 0.35;
     this.punch = Math.max(0, this.punch - dt * 3.2);
-    const kick = this.punch * Math.sin(performance.now() * 0.04);
+    const kick = this.punch * Math.sin(performance.now() * 0.04) * (feel.shakeMul ?? 1);
 
     this.camera.position.set(this.x + bobX, this.y + bobY, this.z);
     this.camera.rotation.order = "YXZ";
-    this.camera.rotation.y = this.yaw + kick * 0.35;
-    this.camera.rotation.x = this.pitch + kick * 0.55;
-    const fearFov = 71 + this.fear * 0.05 - (this.flashlightOn ? 0 : 1.5);
-    this.camera.fov = THREE.MathUtils.damp(this.camera.fov, clamp(fearFov, 66, 80), 4, dt);
+    this.camera.rotation.y = this.yaw + (feel.yawAdd ?? 0) + kick * 0.35;
+    this.camera.rotation.x = this.pitch + (feel.pitchAdd ?? 0) + kick * 0.55;
+    const fearFov = feel.fov ?? 71 + this.fear * 0.05 - (this.flashlightOn ? 0 : 1.5);
+    const fovLo = feel.fov != null ? 54 : 64;
+    this.camera.fov = THREE.MathUtils.damp(this.camera.fov, clamp(fearFov, fovLo, 80), feel.fov != null ? 5 : 14, dt);
     this.camera.updateProjectionMatrix();
-    this.flashlight.intensity = this.flashlightOn ? 26 - this.fear * 0.06 : 0;
-    this.flashFill.intensity = this.flashlightOn ? 5.2 : 0;
+    const beamMul = feel.beamMul ?? 1;
+    this.flashlight.intensity = this.flashlightOn ? (26 - this.fear * 0.06) * beamMul : 0;
+    this.flashFill.intensity = this.flashlightOn ? 5.2 * beamMul : 0;
     this.flashlight.angle = 0.34 + (1 - this.battery / 100) * 0.08;
-    this.beam.visible = this.flashlightOn;
-    (this.beam.material as THREE.MeshBasicMaterial).opacity = this.flashlightOn ? 0.1 + (this.battery / 100) * 0.04 : 0;
+    this.beam.visible = this.flashlightOn && beamMul > 0.08;
+    this.beam.scale.setScalar(0.55 + beamMul * 0.45);
+    this.beam.position.set(0.08 * beamMul, -0.22, -4.6);
+    (this.beam.material as THREE.MeshBasicMaterial).opacity = this.flashlightOn ? (0.1 + (this.battery / 100) * 0.04) * beamMul : 0;
+    const smearMat = this.smear.material as THREE.MeshBasicMaterial;
+    smearMat.opacity = feel.smear ?? 0;
+    this.smear.visible = smearMat.opacity > 0.01;
   }
 
   forward(): THREE.Vector3 {

@@ -19,6 +19,7 @@ import {
   type Wall,
 } from "./math.ts";
 import { initialDoorGeneration } from "./doors.ts";
+import { tileRepeat } from "./directorFeel.ts";
 import { makeGraffitiTexture, tex, tiled } from "./textures.ts";
 
 export type PickupKind = "battery" | "keycard" | "note";
@@ -42,6 +43,9 @@ export type Door = {
   isFalseExit: boolean;
   fake: boolean;
   locked: boolean;
+  baitVisible: boolean;
+  saferDim: boolean;
+  low: boolean;
   connectedRoomId: string | null;
   generation: "idle" | "pending" | "ready";
   pendingSince: number;
@@ -82,6 +86,7 @@ export type BuiltRoom = {
   surface: "carpet" | "wet" | "concrete";
   guideLight: THREE.PointLight | null;
   guideBase: number;
+  puddles: THREE.Mesh[];
 };
 
 const DOOR_W = 1.45;
@@ -137,6 +142,38 @@ const mats = {
   trim: std({ color: 0x6b5420, roughness: 0.75 }),
   bars: std({ color: 0x2a2c28, roughness: 0.35, metalness: 0.7 }),
   alcove: std({ color: 0xc4b24a, map: tex.wall, roughness: 0.86 }),
+  tile: std({ color: 0xc8d4d2, map: tex.tileWall, roughness: 0.36, metalness: 0.06 }),
+  tileFloor: std({
+    color: 0xb8ccc8,
+    map: tex.tileFloor,
+    roughnessMap: tex.tileFloorRough,
+    roughness: 0.16,
+    metalness: 0.16,
+  }),
+  pool: std({
+    color: 0x1a6a62,
+    map: tex.poolWater,
+    transparent: true,
+    opacity: 0.56,
+    roughness: 0.08,
+    metalness: 0.28,
+  }),
+  puddle: std({
+    color: 0x3e9a86,
+    map: tex.poolWater,
+    transparent: true,
+    opacity: 0.4,
+    roughness: 0.06,
+    metalness: 0.32,
+  }),
+  rust: std({ color: 0x6a3a1e, roughness: 0.82, metalness: 0.22 }),
+  ring: std({ color: 0xe85a18, roughness: 0.42, metalness: 0.12 }),
+  extinguisher: std({ color: 0xb82018, roughness: 0.48, metalness: 0.18 }),
+  kick: std({ color: 0xc45a20, roughness: 0.7 }),
+  locker: std({ color: 0x8aa0a4, roughness: 0.45, metalness: 0.35 }),
+  chalk: std({ color: 0x2a3a32, roughness: 0.92 }),
+  plastic: std({ color: 0xc8d0c4, transparent: true, opacity: 0.28, roughness: 0.2 }),
+  paint: std({ color: 0xc9a22a, roughness: 0.7 }),
 };
 
 export function sizeOf(archetype: RoomArchetype, size: RoomDecision["size"]): { w: number; d: number } {
@@ -148,6 +185,12 @@ export function sizeOf(archetype: RoomArchetype, size: RoomDecision["size"]): { 
     stairwell: { w: 8.2, d: 8.2 },
     dead_end: { w: 6.4, d: 6.4 },
     exit_foyer: { w: 9, d: 10 },
+    poolcore: { w: 15, d: 18 },
+    hotel_hall: { w: 5.4, d: 22 },
+    parking_ramp: { w: 10, d: 20 },
+    machine_room: { w: 10, d: 10 },
+    empty_classroom: { w: 13, d: 11 },
+    unfinished: { w: 12, d: 12 },
   };
   const raw = base[archetype];
   const mul = size === "cramped" ? 0.78 : size === "vast" ? 1.28 : 1;
@@ -158,8 +201,11 @@ export function sizeOf(archetype: RoomArchetype, size: RoomDecision["size"]): { 
 
 function wallMaterial(archetype: RoomArchetype): THREE.MeshStandardMaterial {
   if (archetype === "exit_foyer") return mats.wallExit;
-  if (archetype === "stairwell") return mats.wallConcrete;
-  if (archetype === "flooded_lobby") return mats.wallDamp;
+  if (archetype === "stairwell" || archetype === "parking_ramp" || archetype === "machine_room") {
+    return mats.wallConcrete;
+  }
+  if (archetype === "flooded_lobby" || archetype === "unfinished") return mats.wallDamp;
+  if (archetype === "poolcore") return mats.tile;
   return mats.wall;
 }
 
@@ -186,31 +232,47 @@ export function turnsToAlign(entryLocal: Wall, neededWorldOut: Wall): number {
   return 0;
 }
 
-export function localDoorPos(wall: Wall, w: number, d: number): { x: number; z: number } {
-  if (wall === "n") return { x: 0, z: d / 2 };
-  if (wall === "s") return { x: 0, z: -d / 2 };
-  if (wall === "e") return { x: w / 2, z: 0 };
-  return { x: -w / 2, z: 0 };
+export function localDoorPos(wall: Wall, w: number, d: number, along = 0): { x: number; z: number } {
+  if (wall === "n") return { x: along, z: d / 2 };
+  if (wall === "s") return { x: along, z: -d / 2 };
+  if (wall === "e") return { x: w / 2, z: along };
+  return { x: -w / 2, z: along };
 }
 
-function wallSegments(wall: Wall, w: number, d: number, doorOnWall: boolean): Array<{ x: number; z: number; sx: number; sz: number }> {
+function clampDoorAlong(span: number): number {
+  return Math.max(0.2, (span - DOOR_W) / 2 - 0.12);
+}
+
+function wallSegments(
+  wall: Wall,
+  w: number,
+  d: number,
+  doorOnWall: boolean,
+  along = 0,
+): Array<{ x: number; z: number; sx: number; sz: number }> {
   const halfW = w / 2;
   const halfD = d / 2;
   if (wall === "n" || wall === "s") {
     const z = wall === "n" ? halfD : -halfD;
     if (!doorOnWall) return [{ x: 0, z, sx: w + WALL_T, sz: WALL_T }];
-    const side = (w - DOOR_W) / 2;
+    const max = clampDoorAlong(w);
+    const mid = Math.max(-max, Math.min(max, along));
+    const left = mid + halfW - DOOR_W / 2;
+    const right = halfW - mid - DOOR_W / 2;
     return [
-      { x: -(DOOR_W / 2 + side / 2), z, sx: side, sz: WALL_T },
-      { x: DOOR_W / 2 + side / 2, z, sx: side, sz: WALL_T },
+      { x: -halfW + left / 2, z, sx: left, sz: WALL_T },
+      { x: halfW - right / 2, z, sx: right, sz: WALL_T },
     ];
   }
   const x = wall === "e" ? halfW : -halfW;
   if (!doorOnWall) return [{ x, z: 0, sx: WALL_T, sz: d + WALL_T }];
-  const side = (d - DOOR_W) / 2;
+  const max = clampDoorAlong(d);
+  const mid = Math.max(-max, Math.min(max, along));
+  const left = mid + halfD - DOOR_W / 2;
+  const right = halfD - mid - DOOR_W / 2;
   return [
-    { x, z: -(DOOR_W / 2 + side / 2), sx: WALL_T, sz: side },
-    { x, z: DOOR_W / 2 + side / 2, sx: WALL_T, sz: side },
+    { x, z: -halfD + left / 2, sx: WALL_T, sz: left },
+    { x, z: halfD - right / 2, sx: WALL_T, sz: right },
   ];
 }
 
@@ -237,7 +299,7 @@ export function roomWorldBounds(cx: number, cz: number, w: number, d: number, ya
   return transformAabb(aabbFromCenter(0, HEIGHT / 2, 0, w / 2 + 0.2, HEIGHT / 2, d / 2 + 0.2), cx, cz, yaw);
 }
 
-function planDoors(entryLocal: Wall, decision: RoomDecision): { real: Wall[]; fake: Wall[] } {
+function planDoors(entryLocal: Wall, decision: RoomDecision) {
   return planDoorWalls(entryLocal, decision);
 }
 
@@ -246,29 +308,44 @@ function makeDoorVisuals(
   wall: Wall,
   pos: { x: number; z: number },
   kind: "real" | "fake" | "false_exit" | "locked" | "exit",
+  opts: { bait?: boolean; safer?: boolean; low?: boolean } = {},
 ): { shimmer: THREE.Mesh; glitch: THREE.Mesh; veil: THREE.Mesh; frames: THREE.Mesh[] } {
+  const doorH = opts.low ? DOOR_H * 0.72 : DOOR_H;
+  const doorW = opts.low ? DOOR_W * 0.82 : DOOR_W;
   const frameMat = mats.frame.clone();
+  if (opts.safer) frameMat.color.setHex(0x2a2618);
+  if (opts.bait) frameMat.color.setHex(0x8a6a22);
   const left = addBox(
     group,
     frameMat,
-    wall === "e" || wall === "w" ? pos.x : pos.x - (DOOR_W / 2 + 0.06),
-    DOOR_H / 2,
-    wall === "n" || wall === "s" ? pos.z : pos.z - (DOOR_W / 2 + 0.06),
+    wall === "e" || wall === "w" ? pos.x : pos.x - (doorW / 2 + 0.06),
+    doorH / 2,
+    wall === "n" || wall === "s" ? pos.z : pos.z - (doorW / 2 + 0.06),
     wall === "n" || wall === "s" ? 0.1 : 0.22,
-    DOOR_H,
+    doorH,
     wall === "n" || wall === "s" ? 0.22 : 0.1,
   );
   const right = addBox(
     group,
     frameMat,
-    wall === "e" || wall === "w" ? pos.x : pos.x + (DOOR_W / 2 + 0.06),
-    DOOR_H / 2,
-    wall === "n" || wall === "s" ? pos.z : pos.z + (DOOR_W / 2 + 0.06),
+    wall === "e" || wall === "w" ? pos.x : pos.x + (doorW / 2 + 0.06),
+    doorH / 2,
+    wall === "n" || wall === "s" ? pos.z : pos.z + (doorW / 2 + 0.06),
     wall === "n" || wall === "s" ? 0.1 : 0.22,
-    DOOR_H,
+    doorH,
     wall === "n" || wall === "s" ? 0.22 : 0.1,
   );
-  const frames = [left, right];
+  const lintel = addBox(
+    group,
+    frameMat,
+    pos.x,
+    doorH + 0.06,
+    pos.z,
+    wall === "n" || wall === "s" ? doorW + 0.28 : 0.22,
+    0.12,
+    wall === "n" || wall === "s" ? 0.22 : doorW + 0.28,
+  );
+  const frames = [left, right, lintel];
 
   const yaw = wall === "e" ? -Math.PI / 2 : wall === "w" ? Math.PI / 2 : wall === "s" ? Math.PI : 0;
   const shimmerMat = new THREE.MeshBasicMaterial({
@@ -278,7 +355,7 @@ function makeDoorVisuals(
     side: THREE.DoubleSide,
     depthWrite: false,
   });
-  const shimmer = new THREE.Mesh(new THREE.PlaneGeometry(DOOR_W * 0.92, DOOR_H * 0.92), shimmerMat);
+  const shimmer = new THREE.Mesh(new THREE.PlaneGeometry(doorW * 0.92, doorH * 0.92), shimmerMat);
   shimmer.position.set(pos.x, DOOR_H / 2, pos.z);
   shimmer.rotation.y = yaw;
   shimmer.visible = false;
@@ -292,20 +369,20 @@ function makeDoorVisuals(
     depthWrite: false,
     blending: THREE.AdditiveBlending,
   });
-  const glitch = new THREE.Mesh(new THREE.PlaneGeometry(DOOR_W * 0.86, DOOR_H * 0.86), glitchMat);
+  const glitch = new THREE.Mesh(new THREE.PlaneGeometry(doorW * 0.86, doorH * 0.86), glitchMat);
   glitch.position.set(pos.x, DOOR_H / 2, pos.z);
   glitch.rotation.y = yaw;
   glitch.visible = false;
   group.add(glitch);
 
   const veilMat = new THREE.MeshBasicMaterial({
-    color: 0x1c1408,
+    color: opts.bait ? 0xf0e08a : opts.safer ? 0x0c1012 : 0xd47820,
     transparent: true,
-    opacity: kind === "real" ? 0.11 : 0,
+    opacity: kind === "real" ? (opts.bait ? 0.28 : opts.safer ? 0.08 : 0.32) : 0,
     side: THREE.DoubleSide,
     depthWrite: false,
   });
-  const veil = new THREE.Mesh(new THREE.PlaneGeometry(DOOR_W * 0.9, DOOR_H * 0.9), veilMat);
+  const veil = new THREE.Mesh(new THREE.PlaneGeometry(doorW * 0.9, doorH * 0.9), veilMat);
   veil.position.set(pos.x, DOOR_H / 2, pos.z);
   veil.rotation.y = yaw;
   veil.visible = kind === "real";
@@ -313,7 +390,7 @@ function makeDoorVisuals(
 
   if (kind === "fake" || kind === "false_exit") {
     const seal = new THREE.Mesh(
-      new THREE.PlaneGeometry(DOOR_W * 0.96, DOOR_H * 0.96),
+      new THREE.PlaneGeometry(doorW * 0.96, doorH * 0.96),
       std({ color: 0xd6c24a, map: tiled(tex.wall, 0.7, 1.1), roughness: 0.92 }),
     );
     seal.position.set(pos.x, DOOR_H / 2, pos.z);
@@ -345,21 +422,28 @@ function addLight(
   z: number,
   intensity: number,
   decision: RoomDecision,
+  forceDead = false,
 ): void {
-  addBox(group, mats.metal, x, HEIGHT - 0.04, z, 1.7, 0.08, 0.38);
-  const live = decision.lighting !== "dead";
+  const style = decision.lightingStyle ?? (decision.lighting === "dead" ? "almost_dark" : decision.lighting === "dim" ? "half_dead" : decision.lighting === "flickering" ? "flicker" : "steady_cool");
+  const live = !forceDead && decision.lighting !== "dead" && style !== "almost_dark";
+  const poolVibe = decision.roomArchetype === "poolcore" || decision.lightingMood === "humid_teal";
+  const cool = style === "steady_cool" || poolVibe;
+  const emissive = poolVibe ? 0xc8e8f2 : cool || decision.lightingMood === "cold_service" ? 0xdce8f4 : decision.lightingMood === "brownout" ? 0xe0b86a : 0xfff1b0;
+  const barW = poolVibe ? 2.55 : 1.7;
+  const barD = poolVibe ? 0.16 : 0.38;
+  addBox(group, mats.metal, x, HEIGHT - 0.04, z, barW, 0.08, barD);
   const tubeMat = live
     ? new THREE.MeshStandardMaterial({
-        color: 0xfff6d0,
-        emissive: 0xfff1b0,
+        color: poolVibe || cool ? 0xd4eef6 : 0xfff6d0,
+        emissive,
         emissiveIntensity: 1.4,
         roughness: 0.25,
         metalness: 0.1,
       })
     : mats.lightDead;
-  const tube = addBox(group, tubeMat, x, HEIGHT - 0.1, z, 1.45, 0.04, 0.16);
+  const tube = addBox(group, tubeMat, x, HEIGHT - 0.1, z, poolVibe ? 2.35 : 1.45, 0.035, poolVibe ? 0.1 : 0.16);
   if (live) {
-    const light = new THREE.PointLight(0xfff1b0, intensity, 14, 1.45);
+    const light = new THREE.PointLight(emissive, intensity, 14, 1.45);
     light.position.set(x, HEIGHT - 0.32, z);
     group.add(light);
     lights.push({ light, base: intensity, phase: hashString(`${x}:${z}`) % 100, tube });
@@ -399,6 +483,7 @@ function decorate(
   seed: string,
   colliders: Aabb[],
   entryLocal: Wall,
+  puddles: THREE.Mesh[],
 ): Aabb | null {
   const stain = (x: number, z: number, s: number) => {
     const mesh = new THREE.Mesh(new THREE.CircleGeometry(s, 14), mats.stain);
@@ -452,6 +537,13 @@ function decorate(
       colliders.push(aabbFromCenter(pos[0], 0.55, pos[1], 0.7, 0.55, 0.36));
     }
     if (motif !== "broken_symmetry") addBox(group, mats.metal, w * 0.28, 0.7, -d * 0.3, 0.28, 1.1, 0.28);
+    stain(w * 0.18, d * 0.22, 0.85);
+    stain(-w * 0.24, -d * 0.16, 0.55);
+    addBox(group, mats.dark, -w * 0.46, 1.4, 0, 0.02, 2.4, 0.02);
+    addBox(group, mats.dark, w * 0.46, 1.4, d * 0.08, 0.02, 2.4, 0.02);
+    addBox(group, mats.extinguisher, w / 2 - 0.18, 0.72, d * 0.18, 0.16, 0.72, 0.16);
+    addBox(group, mats.paper, w / 2 - 0.2, 1.18, d * 0.18, 0.08, 0.1, 0.12);
+    addBox(group, mats.dark, w / 2 - 0.21, 1.18, d * 0.18, 0.02, 0.04, 0.08);
   }
 
   if (archetype === "flooded_lobby" || decision.encounterCard === "flooded_slow_zone" || decision.hazard === "puddle_slip") {
@@ -466,6 +558,7 @@ function decorate(
   }
 
   if (archetype === "maze_cubicles") {
+    addBox(group, mats.extinguisher, w / 2 - 0.2, 0.7, -d * 0.28, 0.14, 0.68, 0.14);
     const cols = Math.max(3, Math.floor(w / 2.4));
     const rows = Math.max(3, Math.floor(d / 2.4));
     const cw = w / cols;
@@ -521,6 +614,211 @@ function decorate(
     addBox(group, mats.metal, 0, 1.15, d / 2 - 0.28, 1.5, 2.2, 0.12);
   }
 
+  const variant = decision.poolcoreVariant ?? "none";
+  const poolish = archetype === "poolcore" || variant !== "none";
+  if (poolish) {
+    const addPuddle = (x: number, z: number, sx: number, sz: number, y = 0.025) => {
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(sx, sz), mats.puddle.clone());
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.set(x, y, z);
+      group.add(mesh);
+      puddles.push(mesh);
+    };
+    const stainCorner = (x: number, z: number) => {
+      const mesh = new THREE.Mesh(
+        new THREE.CircleGeometry(0.7 + rng() * 0.5, 12),
+        std({ color: 0x6a5a28, transparent: true, opacity: 0.32, roughness: 0.95 }),
+      );
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.set(x, 0.02, z);
+      group.add(mesh);
+    };
+    stainCorner(-w * 0.42, -d * 0.42);
+    stainCorner(w * 0.4, d * 0.38);
+    stainCorner(-w * 0.36, d * 0.4);
+
+    if (variant === "locker_room") {
+      for (let i = -2; i <= 2; i += 1) {
+        addBox(group, mats.locker, -w * 0.38, 1.0, i * 1.15, 0.32, 2.0, 0.9);
+        colliders.push(aabbFromCenter(-w * 0.38, 1.0, i * 1.15, 0.2, 1.0, 0.42));
+      }
+      addBox(group, mats.tile, w * 0.12, 0.28, 0, 2.6, 0.2, 0.42);
+      addPuddle(0.4, -0.6, 2.4, 1.1);
+      addPuddle(-0.8, 1.4, 1.6, 0.9);
+    } else if (variant === "flooded_utility") {
+      addBox(group, mats.metal, -w * 0.28, 1.1, -d * 0.18, 0.22, 2.2, 0.22);
+      addBox(group, mats.metal, w * 0.22, 0.7, d * 0.16, 1.4, 0.16, 0.16);
+      addBox(group, mats.metal, w * 0.22, 1.4, d * 0.16, 0.16, 1.4, 0.16);
+      colliders.push(aabbFromCenter(-w * 0.28, 1.1, -d * 0.18, 0.16, 1.1, 0.16));
+      const flood = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.5, d - 0.5), mats.pool);
+      flood.rotation.x = -Math.PI / 2;
+      flood.position.y = 0.08;
+      group.add(flood);
+      puddles.push(flood);
+    } else if (variant === "shallow_puddle_hall" || (archetype === "poolcore" && variant === "none")) {
+      addPuddle(-w * 0.18, -d * 0.12, 3.4, 1.6);
+      addPuddle(w * 0.22, d * 0.2, 2.2, 1.3);
+      addPuddle(0, -d * 0.28, 1.6, 2.4);
+    } else {
+      const basinW = Math.min(w * 0.52, 8.2);
+      const basinD = Math.min(d * 0.48, 9.4);
+      addBox(group, mats.tile, 0, 0.22, 0, basinW + 0.55, 0.44, basinD + 0.55);
+      addBox(group, mats.dark, 0, -0.15, 0, basinW, 0.2, basinD);
+      const filled = variant !== "empty_pool_hall" && (decision.encounterCard === "flooded_slow_zone" || rng() < 0.35);
+      if (filled) {
+        const pool = new THREE.Mesh(new THREE.PlaneGeometry(basinW - 0.25, basinD - 0.25), mats.pool);
+        pool.rotation.x = -Math.PI / 2;
+        pool.position.y = 0.16;
+        group.add(pool);
+        puddles.push(pool);
+      } else {
+        addBox(group, mats.dark, 0, 0.02, 0, 0.55, 0.04, 0.55);
+        addBox(group, mats.metal, 0, 0.03, 0, 0.42, 0.02, 0.42);
+        const crack = new THREE.Mesh(
+          new THREE.PlaneGeometry(basinW * 0.7, 0.06),
+          std({ color: 0x1a2020, roughness: 1 }),
+        );
+        crack.rotation.x = -Math.PI / 2;
+        crack.rotation.z = 0.4;
+        crack.position.y = 0.03;
+        group.add(crack);
+      }
+      for (const side of [-1, 1]) {
+        addBox(group, mats.metal, side * (basinW / 2 - 0.15), 0.85, -basinD / 2 + 0.2, 0.06, 1.5, 0.06);
+        addBox(group, mats.metal, side * (basinW / 2 - 0.15), 0.18, -basinD / 2 + 0.55, 0.08, 0.08, 0.7);
+      }
+    }
+    if (archetype === "poolcore" && variant !== "locker_room") {
+      const colX = w * 0.3;
+      const colZ = d * 0.26;
+      addBox(group, mats.tile, -colX, 1.2, -colZ, 0.42, 2.4, 0.42);
+      addBox(group, mats.tile, colX, 1.2, -colZ, 0.42, 2.4, 0.42);
+      addBox(group, mats.tile, -colX, 1.2, colZ, 0.42, 2.4, 0.42);
+      addBox(group, mats.tile, colX, 1.2, colZ, 0.42, 2.4, 0.42);
+      colliders.push(aabbFromCenter(-colX, 1.2, -colZ, 0.24, 1.2, 0.24));
+      colliders.push(aabbFromCenter(colX, 1.2, -colZ, 0.24, 1.2, 0.24));
+      colliders.push(aabbFromCenter(-colX, 1.2, colZ, 0.24, 1.2, 0.24));
+      colliders.push(aabbFromCenter(colX, 1.2, colZ, 0.24, 1.2, 0.24));
+    }
+    addBox(group, mats.rust, w * 0.36, 0.04, d * 0.36, 0.55, 0.04, 0.55);
+    addBox(group, mats.dark, w * 0.36, 0.055, d * 0.36, 0.38, 0.02, 0.38);
+    const bubble = new THREE.Mesh(
+      new THREE.CircleGeometry(0.07, 8),
+      new THREE.MeshBasicMaterial({ color: 0xa8d8d0, transparent: true, opacity: 0.28, depthWrite: false }),
+    );
+    bubble.rotation.x = -Math.PI / 2;
+    bubble.position.set(w * 0.36, 0.09, d * 0.36);
+    group.add(bubble);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.065, 8, 18), mats.ring);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.set(-w * 0.38, 1.12, -d * 0.4);
+    group.add(ring);
+    addBox(group, mats.ring, -w * 0.38, 1.12, -d * 0.4, 0.08, 0.08, 0.08);
+    const inward = { n: { x: 0, z: -1 }, s: { x: 0, z: 1 }, e: { x: -1, z: 0 }, w: { x: 1, z: 0 } }[entryLocal];
+    for (let i = 0; i < 5; i += 1) {
+      const mesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.16, 0.28),
+        std({ color: 0x4a5550, transparent: true, opacity: 0.22 - i * 0.03, roughness: 0.35 }),
+      );
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.set(inward.x * (0.6 + i * 0.42) + (i % 2) * 0.16, 0.021, inward.z * (0.6 + i * 0.42));
+      group.add(mesh);
+    }
+    const drops = new THREE.Mesh(
+      new THREE.PlaneGeometry(w * 0.8, d * 0.8),
+      new THREE.MeshBasicMaterial({
+        map: tex.poolCeiling,
+        transparent: true,
+        opacity: 0.18,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
+    );
+    drops.rotation.x = Math.PI / 2;
+    drops.position.y = HEIGHT - 0.02;
+    group.add(drops);
+    const haze = new THREE.Mesh(
+      new THREE.PlaneGeometry(w * 0.92, d * 0.92),
+      new THREE.MeshBasicMaterial({
+        color: 0xd8eeea,
+        transparent: true,
+        opacity: decision.humidity === "heavy" ? 0.08 : 0.05,
+        depthWrite: false,
+      }),
+    );
+    haze.rotation.x = -Math.PI / 2;
+    haze.position.set(0, 0.22, 0);
+    group.add(haze);
+  }
+
+  if (archetype === "hotel_hall") {
+    for (let z = -d / 2 + 2.4; z < d / 2 - 2; z += 3.2) {
+      addBox(group, mats.frame, w / 2 - 0.12, 1.7, z, 0.04, 0.22, 0.42);
+      addBox(group, mats.paper, w / 2 - 0.14, 1.7, z, 0.01, 0.16, 0.28);
+    }
+    addBox(group, mats.desk, 0, 0.45, 0, 0.7, 0.9, 0.7);
+    addBox(group, mats.extinguisher, w / 2 - 0.16, 0.7, -d * 0.12, 0.14, 0.68, 0.14);
+    stain(0.4, d * 0.2, 0.7);
+  }
+
+  if (archetype === "parking_ramp") {
+    for (let z = -d / 2 + 2; z < d / 2 - 1; z += 2.4) {
+      addBox(group, mats.paint, -w * 0.18, 0.02, z, 0.16, 0.02, 1.1);
+      addBox(group, mats.paint, w * 0.18, 0.02, z, 0.16, 0.02, 1.1);
+    }
+    addBox(group, mats.wallConcrete, 0, 1.2, 0, 0.7, 2.4, 0.7);
+    colliders.push(aabbFromCenter(0, 1.2, 0, 0.4, 1.2, 0.4));
+  }
+
+  if (archetype === "machine_room") {
+    addBox(group, mats.metal, -w * 0.22, 0.85, -d * 0.1, 1.8, 1.7, 1.1);
+    addBox(group, mats.metal, w * 0.24, 0.55, d * 0.16, 1.1, 1.1, 1.1);
+    addBox(group, mats.metal, 0.2, 1.6, 0, 2.4, 0.12, 0.12);
+    colliders.push(aabbFromCenter(-w * 0.22, 0.85, -d * 0.1, 0.95, 0.85, 0.55));
+    colliders.push(aabbFromCenter(w * 0.24, 0.55, d * 0.16, 0.55, 0.55, 0.55));
+  }
+
+  if (archetype === "empty_classroom") {
+    addBox(group, mats.chalk, 0, 1.45, -d / 2 + 0.12, 3.6, 1.3, 0.06);
+    for (let i = -1; i <= 1; i += 1) {
+      for (let j = -1; j <= 1; j += 1) {
+        const x = i * 2.2;
+        const z = j * 1.8 + 0.4;
+        addBox(group, mats.desk, x, 0.42, z, 1.1, 0.08, 0.55);
+        addBox(group, mats.dark, x, 0.22, z, 0.08, 0.4, 0.08);
+        colliders.push(aabbFromCenter(x, 0.42, z, 0.55, 0.42, 0.28));
+      }
+    }
+  }
+
+  if (archetype === "unfinished") {
+    for (const side of [-1, 1]) {
+      addBox(group, mats.wallConcrete, side * w * 0.22, 1.1, -d * 0.12, 0.08, 2.2, 1.8);
+      addBox(group, mats.plastic, side * w * 0.18, 1.2, d * 0.16, 1.6, 2.2, 0.04);
+    }
+    addBox(group, mats.desk, w * 0.28, 0.35, d * 0.22, 0.7, 0.5, 0.5);
+  }
+
+  const crumb = decision.narrativeCrumb ?? "none";
+  if (crumb === "wrong_door_number" || decision.clueBeat === "wrong_door_number") {
+    const plate = addBox(group, mats.paper, w * 0.2, 1.7, -d / 2 + 0.12, 0.42, 0.22, 0.02);
+    addBox(group, mats.dark, plate.position.x, 1.7, plate.position.z + 0.01, 0.28, 0.1, 0.01);
+  }
+  if (crumb === "wet_footprints" || decision.clueBeat === "wet_footprints") {
+    for (let i = 0; i < 6; i += 1) {
+      const mesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.18, 0.32),
+        std({ color: 0x3a4a40, transparent: true, opacity: 0.28 - i * 0.03, roughness: 0.3 }),
+      );
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.set(-0.2 + (i % 2) * 0.22, 0.02, -d * 0.2 + i * 0.38);
+      group.add(mesh);
+    }
+  }
+  if (crumb === "unfinished_notice" || decision.clueBeat === "unfinished_notice") {
+    addBox(group, mats.paper, -w * 0.18, 1.55, -d / 2 + 0.11, 0.7, 0.5, 0.02);
+  }
+
   if (decision.clueBeat === "graffiti") {
     const text = graffitiFor(seed);
     const gtex = makeGraffitiTexture(text);
@@ -572,14 +870,30 @@ export function buildRoom(options: {
   group.rotation.y = yaw;
 
   const wet =
-    archetype === "flooded_lobby" || decision.hazard === "puddle_slip" || decision.encounterCard === "flooded_slow_zone";
-  const floorMat = wet ? mats.carpetWet.clone() : mats.carpet.clone();
-  if (floorMat.map) floorMat.map = tiled(floorMat.map, w / 3.2, d / 3.2);
-  if (floorMat.roughnessMap) floorMat.roughnessMap = tiled(floorMat.roughnessMap, w / 3.2, d / 3.2);
+    archetype === "flooded_lobby" ||
+    archetype === "poolcore" ||
+    decision.hazard === "puddle_slip" ||
+    decision.hazard === "environmental" ||
+    decision.encounterCard === "flooded_slow_zone" ||
+    (decision.poolcoreVariant ?? "none") !== "none";
+  const floorMat =
+    archetype === "poolcore" || (decision.poolcoreVariant ?? "none") !== "none"
+      ? mats.tileFloor.clone()
+      : wet
+        ? mats.carpetWet.clone()
+        : archetype === "parking_ramp" || archetype === "machine_room"
+          ? mats.wallConcrete.clone()
+          : mats.carpet.clone();
+  const floorRepX = archetype === "poolcore" || (decision.poolcoreVariant ?? "none") !== "none" ? tileRepeat(w) : w / 3.2;
+  const floorRepZ = archetype === "poolcore" || (decision.poolcoreVariant ?? "none") !== "none" ? tileRepeat(d) : d / 3.2;
+  if (floorMat.map) floorMat.map = tiled(floorMat.map, floorRepX, floorRepZ);
+  if (floorMat.roughnessMap) floorMat.roughnessMap = tiled(floorMat.roughnessMap, floorRepX, floorRepZ);
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(w, d), floorMat);
   floor.rotation.x = -Math.PI / 2;
   group.add(floor);
-  const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mats.ceiling);
+  const ceilingMat =
+    archetype === "poolcore" ? std({ color: 0xc6d4d2, map: tex.poolCeiling, roughness: 0.55 }) : mats.ceiling;
+  const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(w, d), ceilingMat);
   ceiling.rotation.x = Math.PI / 2;
   ceiling.position.y = HEIGHT;
   group.add(ceiling);
@@ -592,19 +906,34 @@ export function buildRoom(options: {
   const lights: RoomLight[] = [];
   const pickups: Pickup[] = [];
   const doors: Door[] = [];
+  const puddles: THREE.Mesh[] = [];
+  const sideWalls = new Set<Wall>([
+    rotateWall(entryLocal, 1),
+    rotateWall(entryLocal, -1),
+  ]);
 
   for (const wall of ["n", "s", "e", "w"] as const) {
     const hasOpening = openingWalls.has(wall);
-    for (const seg of wallSegments(wall, w, d, hasOpening)) {
+    const bait = planned.bait === wall;
+    const safer = planned.safer === wall && !bait;
+    const along =
+      hasOpening && sideWalls.has(wall) && !bait ? (wall === "n" || wall === "s" ? w : d) * 0.2 : 0;
+    for (const seg of wallSegments(wall, w, d, hasOpening, along)) {
       const wmat = wallMaterial(archetype).clone();
-      if (wmat.map) wmat.map = tiled(wmat.map, Math.max(seg.sx, seg.sz) / 2.2, HEIGHT / 2.4);
+      if (wmat.map) {
+        const along = Math.max(seg.sx, seg.sz);
+        wmat.map =
+          archetype === "poolcore"
+            ? tiled(wmat.map, tileRepeat(along), tileRepeat(HEIGHT))
+            : tiled(wmat.map, along / 2.2, HEIGHT / 2.4);
+      }
       addBox(group, wmat, seg.x, HEIGHT / 2, seg.z, seg.sx, HEIGHT, seg.sz);
       collidersLocal.push(aabbFromCenter(seg.x, HEIGHT / 2, seg.z, seg.sx / 2, HEIGHT / 2, seg.sz / 2));
     }
     const mid = wall === "n" || wall === "s" ? { x: 0, z: wall === "n" ? d / 2 : -d / 2 } : { x: wall === "e" ? w / 2 : -w / 2, z: 0 };
     addBox(
       group,
-      mats.trim,
+      archetype === "poolcore" ? mats.kick : mats.trim,
       mid.x,
       0.08,
       mid.z,
@@ -614,11 +943,12 @@ export function buildRoom(options: {
     );
 
     if (hasOpening) {
-      const pos = localDoorPos(wall, w, d);
+      const pos = localDoorPos(wall, w, d, along);
       const isEntry = wall === entryLocal;
       const isExit = archetype === "exit_foyer" && wall === opposite(entryLocal);
       const fake = planned.fake.includes(wall);
       const falseExit = fake && decision.clueBeat === "false_exit";
+      const low = !isEntry && sideWalls.has(wall) && !bait;
       const lockThis =
         !isEntry &&
         !fake &&
@@ -630,12 +960,18 @@ export function buildRoom(options: {
         wall,
         pos,
         isExit ? "exit" : lockThis ? "locked" : falseExit ? "false_exit" : fake ? "fake" : "real",
+        { bait, safer, low },
       );
       if (fake || lockThis) {
         const out = wallNormal(wall);
         collidersLocal.push(
           aabbFromCenter(pos.x + out.x * 0.22, 1.1, pos.z + out.z * 0.22, 0.55, 1.1, 0.55),
         );
+      }
+      if (bait && !fake && !isEntry) {
+        const glow = new THREE.PointLight(0xf0e8a0, 3.4, 4.2, 1.8);
+        glow.position.set(pos.x, 1.7, pos.z);
+        group.add(glow);
       }
       doors.push({
         id: `${id}-${wall}`,
@@ -648,6 +984,9 @@ export function buildRoom(options: {
         isFalseExit: falseExit || (!fake && decision.clueBeat === "false_exit" && wall === opposite(entryLocal) && archetype !== "exit_foyer"),
         fake,
         locked: lockThis,
+        baitVisible: bait,
+        saferDim: safer,
+        low,
         connectedRoomId: null,
         generation: initialDoorGeneration(isEntry, id),
         pendingSince: 0,
@@ -666,16 +1005,45 @@ export function buildRoom(options: {
     makeDoorVisuals(group, wall, pos, "false_exit");
   }
 
+  const style = decision.lightingStyle;
   const dimMul =
-    decision.lighting === "harsh" ? 1.25 : decision.lighting === "dim" ? 0.42 : decision.lighting === "dead" ? 0.0 : 0.82;
-  if (archetype === "long_hall") {
-    for (let z = -d / 2 + 2; z < d / 2; z += 3.6) addLight(group, lights, 0, z, 18 * Math.max(dimMul, 0.05), decision);
+    style === "steady_cool" || decision.lighting === "harsh"
+      ? 1.12
+      : style === "half_dead" || decision.lighting === "dim"
+        ? 0.42
+        : style === "almost_dark" || decision.lighting === "dead"
+          ? 0.0
+          : 0.82;
+  const placeTube = (x: number, z: number, intensity: number, index: number) => {
+    const deadSection =
+      (style === "half_dead" && index % 2 === 1) || (archetype === "poolcore" && index === 2);
+    addLight(group, lights, x, z, intensity * Math.max(dimMul, deadSection ? 0 : 0.05), decision, deadSection);
+  };
+  if (archetype === "long_hall" || archetype === "hotel_hall" || archetype === "parking_ramp") {
+    let i = 0;
+    for (let z = -d / 2 + 2; z < d / 2; z += 3.4) {
+      placeTube(0, z, 17, i);
+      i += 1;
+    }
   } else if (archetype === "dead_end") {
-    addLight(group, lights, 0, 0, 12 * Math.max(dimMul, 0.05), decision);
+    placeTube(0, 0, 12, 0);
+  } else if (archetype === "poolcore") {
+    placeTube(-w * 0.28, -d * 0.28, 17, 0);
+    placeTube(w * 0.26, d * 0.22, 16, 1);
+    placeTube(0, 0, 14, 2);
+    placeTube(w * 0.2, -d * 0.3, 13, 3);
   } else {
-    addLight(group, lights, -w * 0.22, -d * 0.2, 16 * Math.max(dimMul, 0.05), decision);
-    addLight(group, lights, w * 0.2, d * 0.18, 15 * Math.max(dimMul, 0.05), decision);
-    if (w > 10) addLight(group, lights, 0, 0, 13 * Math.max(dimMul, 0.05), decision);
+    placeTube(-w * 0.22, -d * 0.2, 16, 0);
+    placeTube(w * 0.2, d * 0.18, 15, 1);
+    if (w > 10) placeTube(0, 0, 13, 2);
+  }
+  if (style === "almost_dark") {
+    const far = doors.find((door) => door.baitVisible) ?? doors.find((door) => !door.fake && door.wall !== entryLocal);
+    if (far) {
+      const glow = new THREE.PointLight(0xd8fff0, 2.6, 5.5, 1.8);
+      glow.position.set(far.localX, 1.6, far.localZ);
+      group.add(glow);
+    }
   }
 
   let guideLight: THREE.PointLight | null = null;
@@ -691,7 +1059,7 @@ export function buildRoom(options: {
   }
 
   const rng = mulberry32(hashString(id));
-  const alcoveLocal = decorate(group, archetype, w, d, rng, decision, pickups, id, collidersLocal, entryLocal);
+  const alcoveLocal = decorate(group, archetype, w, d, rng, decision, pickups, id, collidersLocal, entryLocal, puddles);
 
   let darkPatch: Aabb | null = null;
   if (decision.hazard === "dark_patch") {
@@ -720,9 +1088,10 @@ export function buildRoom(options: {
     depth: d,
     entryWall: entryLocal,
     powerFlicker: decision.encounterCard === "power_flicker_event" ? 1.7 : 0,
-    surface: archetype === "stairwell" ? "concrete" : wet ? "wet" : "carpet",
+    surface: archetype === "stairwell" || archetype === "parking_ramp" || archetype === "machine_room" ? "concrete" : wet ? "wet" : "carpet",
     guideLight,
     guideBase,
+    puddles,
   };
 }
 
@@ -752,6 +1121,7 @@ export function placeAgainstDoor(
   parent: BuiltRoom,
   parentDoor: Door,
   decision: RoomDecision,
+  extraGap = 0,
 ): { cx: number; cz: number; yawTurns: number; entryWorldWall: Wall } {
   const out = doorOutward(parent, parentDoor);
   const neededEntryWorld = opposite(parentDoor.worldWall);
@@ -760,9 +1130,10 @@ export function placeAgainstDoor(
   const { d } = sizeOf(decision.roomArchetype, decision.size);
   const half = d / 2;
   const parentPos = doorWorldPos(parent, parentDoor);
+  const gap = extraGap + 0.02;
   return {
-    cx: parentPos.x + out.x * (half + 0.02),
-    cz: parentPos.z + out.z * (half + 0.02),
+    cx: parentPos.x + out.x * (half + gap),
+    cz: parentPos.z + out.z * (half + gap),
     yawTurns,
     entryWorldWall: neededEntryWorld,
   };
@@ -773,6 +1144,14 @@ export function startRoomDecision(): RoomDecision {
     roomArchetype: "empty_office",
     size: "standard",
     lighting: "flickering",
+    lightingMood: "sick_yellow",
+    lightingStyle: "flicker",
+    poolcoreVariant: "none",
+    humidity: "dry",
+    soundBed: "hvac_hum",
+    narrativeCrumb: "none",
+    exitLayout: "cross",
+    familiarReturn: false,
     hazard: "none",
     loot: "battery",
     entityPresent: false,
@@ -793,5 +1172,8 @@ export function startRoomDecision(): RoomDecision {
     soundBait: false,
     soundBaitNoul: 0.04,
     entityAggression: 0.2,
+    entityPressure: 0.25,
+    tunnelLength: "short",
+    tunnelMood: "yellow_throat",
   };
 }

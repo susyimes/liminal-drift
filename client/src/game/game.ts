@@ -15,8 +15,31 @@ import { Player } from "./player.ts";
 import type { BuiltRoom, Door } from "./rooms.ts";
 import { doorOutward, doorWorldPos } from "./rooms.ts";
 import { World } from "./world.ts";
-import { OPENING_HINT, depthHudText, roomVibeHud } from "./copy.ts";
-import { enterExposureDip, enterFadeOpacity, enterVignetteAdd } from "./lighting.ts";
+import { OPENING_HINT, depthHudText, hudVibeArchetype, roomVibeHud, tunnelVibeHud } from "./copy.ts";
+import {
+  ENTER_HOLD_S,
+  PLACE_INSIDE_M,
+  SETTLE_S,
+  controlEase,
+  eyeHeight,
+  exitFlashAdd,
+  glanceSignFromExits,
+  glanceYaw,
+  holdActive,
+  isPoolVibe,
+  isYellowOffice,
+  exitRecover,
+  liftAmount,
+  tunnelBreath,
+  tunnelFov,
+  tunnelPitch,
+  tunnelSmearOpacity,
+  tunnelSpeedMul,
+  tunnelStrafeMul,
+  tunnelVignette,
+} from "./directorFeel.ts";
+import { enterExposureDip, enterFadeOpacity, enterVignetteAdd, tunnelFogHex, tunnelOverlayOpacity } from "./lighting.ts";
+import { tunnelProgress, tunnelWalkYaw } from "./transit.ts";
 
 export type GameMode = "title" | "playing" | "over";
 export type OverKind = "dead" | "exit" | "depth";
@@ -70,6 +93,12 @@ export class Game {
   private hint: string | null = null;
   private hintAge = 0;
   private hintChimed = false;
+  private lastTransitId: string | null = null;
+  private holdRemain = 0;
+  private settleAge = SETTLE_S;
+  private glanceSign = 0;
+  private stayRoomId: string | null = null;
+  private stayRemain = 0;
   private hurtFlash = 0;
   private hemi: THREE.HemisphereLight;
   private ambient: THREE.AmbientLight;
@@ -145,12 +174,32 @@ export class Game {
     }
     this.placeAtDoor(room, door, 0.12);
     const portal = this.world.tryEnter(this.player.x, this.player.z, this.compactState());
+    if (portal.kind === "tunnel" || this.world.transit) {
+      const dest = this.world.forceCompleteTransit(this.compactState());
+      if (dest) {
+        this.player.x = dest.cx;
+        this.player.z = dest.cz;
+        this.markEntered(dest);
+        this.holdRemain = 0;
+        this.settleAge = SETTLE_S;
+        return {
+          kind: "entered",
+          depth: this.world.roomsVisited,
+          roomId: this.world.currentId,
+          archetype: dest.archetype,
+          source: this.world.lastSource,
+          warning: this.world.lastWarning,
+        };
+      }
+    }
     if (portal.kind === "entered") {
       this.nudgeThroughDoor();
       const dest = this.world.current;
       this.player.x = dest.cx;
       this.player.z = dest.cz;
       this.markEntered(dest);
+      this.holdRemain = 0;
+      this.settleAge = SETTLE_S;
     }
     return {
       kind: portal.kind,
@@ -183,13 +232,21 @@ export class Game {
     this.mode = "playing";
     this.status = "Yellow forever. The tubes remember a building.";
     this.waitingDoor = false;
+    this.audio.setTunnel(false);
+    this.audio.setHumidity(false);
     this.fearFromJev = 0.45;
-    this.enterFade = 0.55;
+    this.enterFade = 0.28;
     this.lastEnteredRoomId = this.world.currentId;
     this.toast = null;
     this.hint = OPENING_HINT;
     this.hintAge = 5.4;
     this.hintChimed = false;
+    this.lastTransitId = null;
+    this.holdRemain = 0;
+    this.settleAge = SETTLE_S;
+    this.glanceSign = 0;
+    this.stayRoomId = this.world.currentId;
+    this.stayRemain = 0;
     this.clock = new THREE.Clock();
   }
 
@@ -212,8 +269,16 @@ export class Game {
       encounter: this.world.current.decision.encounterCard,
       ambience: this.world.current.decision.ambience,
       exitChance: this.world.exitChance,
-      archetype: this.world.current.archetype,
-      vibe: roomVibeHud(this.world.current.archetype),
+      archetype: this.world.transit ? this.world.transit.tunnel.mood : this.shownRoom().archetype,
+      vibe: this.world.transit
+        ? tunnelVibeHud(this.world.transit.tunnel.mood)
+        : roomVibeHud(
+            hudVibeArchetype(
+              this.world.rooms.get(this.lastEnteredRoomId ?? "")?.archetype,
+              this.world.roomAt(this.player.x, this.player.z)?.archetype,
+              this.world.current.archetype,
+            ),
+          ),
       depthLabel: depthHudText(this.world.roomsVisited),
       hint: this.hint,
     };
@@ -229,28 +294,58 @@ export class Game {
 
   private update(dt: number): void {
     if (this.input.consumeMute()) this.audio.toggleMute();
-    this.player.update(dt, this.input, this.world);
+    this.holdRemain = Math.max(0, this.holdRemain - dt);
+    if (!this.world.transit) this.settleAge += dt;
+    const transit = this.world.transit;
+    const progress = transit ? tunnelProgress(transit.tunnel, this.player.x, this.player.z) : 0;
+    const destArch = transit?.door.decision?.roomArchetype ?? this.world.current.archetype;
+    const destMood = transit?.door.decision?.lightingMood ?? this.world.current.decision.lightingMood;
+    const poolNow = isPoolVibe(this.world.current.archetype, this.world.current.decision.lightingMood) ||
+      transit?.tunnel.mood === "pool_pipe";
+    const yellowNow = isYellowOffice(this.world.current.archetype);
+    const eyeKind = transit ? "tunnel" : poolNow ? "pool" : yellowNow ? "yellow" : "other";
+    const destEye = eyeHeight(isPoolVibe(destArch, destMood) ? "pool" : isYellowOffice(destArch) ? "yellow" : eyeKind);
+    const lift = transit ? 0 : liftAmount(this.settleAge);
+    const eyeY = transit ? eyeHeight("tunnel") : eyeHeight("tunnel") + (destEye - eyeHeight("tunnel")) * lift;
+    const breath = transit ? tunnelBreath(performance.now() / 1000) : { pitch: 0, fov: 0 };
+    this.player.update(dt, this.input, this.world, {
+      locked: holdActive(this.holdRemain),
+      speedEase: transit ? tunnelSpeedMul(progress) : controlEase(this.settleAge),
+      strafeMul: transit ? tunnelStrafeMul() : 1,
+      eyeY,
+      pitchAdd: transit ? tunnelPitch(progress) + breath.pitch : 0,
+      yawAdd: transit ? 0 : glanceYaw(this.settleAge, this.glanceSign),
+      fov: transit ? tunnelFov(progress) + breath.fov : null,
+      bobMul: transit ? 0.12 : controlEase(this.settleAge),
+      shakeMul: transit ? 0 : 1,
+      smear: transit ? tunnelSmearOpacity(this.player.moving || holdActive(this.holdRemain)) : 0,
+      beamMul: transit ? 0.22 : 1,
+    });
 
-    const contained = this.world.roomAt(this.player.x, this.player.z);
-    if (contained) this.world.currentId = contained.id;
+    const containedBefore = this.world.roomAt(this.player.x, this.player.z);
 
     const compact = this.compactState();
     void this.world.considerPrefetch(this.player.x, this.player.z, compact);
-    let portal = this.world.tryEnter(this.player.x, this.player.z, compact);
-    if (!contained && portal.kind === "none") {
+    let portal = this.world.transit
+      ? this.world.advanceTransit(this.player.x, this.player.z, compact)
+      : this.world.tryEnter(this.player.x, this.player.z, compact);
+    if (!this.world.transit && !containedBefore && portal.kind === "none") {
       const rescued = this.world.rescueOutside(this.player.x, this.player.z, compact);
       if (rescued.kind !== "none") portal = rescued;
     }
-    this.waitingDoor = portal.kind === "waiting";
+    this.waitingDoor = portal.kind === "waiting" || Boolean(portal.waiting);
     this.audio.setPortal(this.waitingDoor);
-    if (portal.kind === "waiting") {
+    this.audio.setTunnel(Boolean(this.world.transit), this.world.transit?.tunnel.mood ?? "yellow_throat");
+    if (portal.kind === "tunnel" && portal.tunnel && this.world.transit) {
+      this.ensureInsideTunnel(portal.tunnel);
+      this.hint = null;
+      this.status = this.waitingDoor
+        ? "The throat is still inventing the next room."
+        : "A connecting hall. Keep walking.";
+    } else if (portal.kind === "waiting") {
       this.status = "The doorway is still deciding what it is.";
     } else if (portal.kind === "entered" && portal.room) {
-      this.nudgeThroughDoor();
-      if (!this.world.roomAt(this.player.x, this.player.z)) {
-        this.player.x = portal.room.cx;
-        this.player.z = portal.room.cz;
-      }
+      this.placeJustInside(portal.room);
       this.world.currentId = portal.room.id;
       this.markEntered(portal.room);
     } else if (portal.kind === "exit") {
@@ -259,8 +354,21 @@ export class Game {
       this.status = this.player.hasKeycard ? "The lock hesitates." : "The lock wants a card.";
     } else if (portal.kind === "fake") {
       this.status = "The hallway is wallpaper. Someone wanted you to believe in a door.";
-    } else if (contained && this.lastEnteredRoomId !== contained.id) {
-      this.markEntered(contained);
+    } else if (
+      containedBefore &&
+      this.lastEnteredRoomId !== containedBefore.id &&
+      !this.world.transit
+    ) {
+      this.world.currentId = containedBefore.id;
+      this.markEntered(containedBefore);
+    }
+
+    this.stayRemain = Math.max(0, this.stayRemain - dt);
+    const here = this.world.roomAt(this.player.x, this.player.z);
+    if (this.stayRemain > 0 && this.stayRoomId && !this.world.transit) {
+      this.world.currentId = this.stayRoomId;
+    } else if (here && !this.world.transit) {
+      this.world.currentId = here.id;
     }
 
     this.collect(dt);
@@ -292,9 +400,15 @@ export class Game {
       this.player.punch = Math.max(this.player.punch, (prox - 0.68) * 0.12);
       this.hurtFlash = Math.max(this.hurtFlash, (prox - 0.68) * 1.6);
     }
-    this.audio.setAmbience(this.world.current.decision.ambience);
+    const inPool =
+      isPoolVibe(this.world.current.archetype, this.world.current.decision.lightingMood) ||
+      this.world.transit?.tunnel.mood === "pool_pipe";
+    this.audio.setAmbience(inPool ? "drip" : this.world.current.decision.ambience);
+    const humidity = this.world.current.decision.humidity ?? (inPool ? "damp" : "dry");
+    this.audio.setHumidity(inPool || humidity !== "dry", humidity);
     this.audio.setProximity(prox);
-    this.audio.update(dt, this.player.moving, this.player.sneak, this.player.fear, this.world.current.surface);
+    const surface = this.world.transit?.tunnel.surface ?? this.world.current.surface;
+    this.audio.update(dt, this.player.moving, this.player.sneak, this.player.fear, surface);
 
     this.enterFade = Math.max(0, this.enterFade - dt * 2.15);
     this.hurtFlash = Math.max(0, this.hurtFlash - dt * 1.4);
@@ -333,33 +447,87 @@ export class Game {
 
   private applyAtmosphere(prox: number): void {
     const lighting = this.world.current.decision.lighting;
+    const mood = this.world.current.decision.lightingMood ?? "sick_yellow";
+    const yellow = isYellowOffice(this.world.current.archetype);
+    const pool =
+      isPoolVibe(this.world.current.archetype, mood) || this.world.transit?.tunnel.mood === "pool_pipe";
+    const progress = this.world.transit
+      ? tunnelProgress(this.world.transit.tunnel, this.player.x, this.player.z)
+      : 0;
     const fog = this.scene.fog;
-    const fogColor = lighting === "dead" ? 0x141820 : lighting === "dim" ? 0x3a3420 : 0x8a7430;
-    this.scene.background = new THREE.Color(lighting === "dead" ? 0x0a0c10 : 0x2a220e);
+    const fogColor = this.world.transit
+      ? tunnelFogHex(this.world.transit.tunnel.mood)
+      : pool
+        ? 0x16383c
+        : lighting === "dead"
+          ? 0x141820
+          : lighting === "dim"
+            ? 0x3a3420
+            : 0x9a7e2c;
+    this.scene.background = new THREE.Color(
+      pool || this.world.transit?.tunnel.mood === "pool_pipe" ? 0x081618 : lighting === "dead" ? 0x0a0c10 : 0x2c220c,
+    );
+    const humidity = this.world.current.decision.humidity ?? (pool ? "damp" : "dry");
     if (fog instanceof THREE.Fog) {
-      fog.near = lighting === "dead" ? 1.8 : 3.2;
-      fog.far = (lighting === "dead" ? 14 : lighting === "dim" ? 18 : 23) - this.player.fear * 0.04;
+      fog.near = this.world.transit ? 1.15 : lighting === "dead" ? 1.8 : humidity === "heavy" ? 1.6 : pool ? 2.0 : 3.6;
+      fog.far =
+        (this.world.transit
+          ? 6.2
+          : lighting === "dead"
+            ? 14
+            : humidity === "heavy"
+              ? 12
+              : humidity === "damp" || pool
+                ? 15
+                : lighting === "dim"
+                  ? 17
+                  : 24) - this.player.fear * 0.04;
       fog.color.setHex(fogColor);
     }
     const nearMat = this.hazeNear.material as THREE.MeshBasicMaterial;
     const farMat = this.hazeFar.material as THREE.MeshBasicMaterial;
-    nearMat.opacity = lighting === "dead" ? 0.02 : 0.045 + this.enterFade * 0.03;
-    farMat.color.setHex(lighting === "dead" ? 0x1a222c : 0x3d4a58);
-    farMat.opacity = 0.06 + this.player.fear * 0.0004;
-    this.ambient.intensity = lighting === "harsh" ? 0.2 : lighting === "dead" ? 0.06 : 0.15;
-    this.hemi.intensity = lighting === "harsh" ? 0.26 : 0.2;
+    this.hazeNear.position.y = pool && !this.world.transit ? -1.08 : 0.1;
+    this.hazeNear.position.z = pool && !this.world.transit ? -4.2 : -9;
+    nearMat.opacity = lighting === "dead" ? 0.02 : 0.045 + this.enterFade * 0.03 + (pool ? 0.05 : yellow ? 0.01 : 0);
+    nearMat.color.setHex(pool ? 0xc8e8e4 : 0xc4a24a);
+    farMat.color.setHex(pool ? 0x143238 : lighting === "dead" ? 0x1a222c : 0x3d4a58);
+    farMat.opacity = 0.06 + this.player.fear * 0.0004 + (pool ? 0.018 : 0);
+    this.ambient.intensity = pool ? 0.12 : yellow || lighting === "harsh" ? 0.22 : lighting === "dead" ? 0.06 : 0.15;
+    this.hemi.intensity = pool ? 0.16 : yellow || lighting === "harsh" ? 0.28 : 0.2;
+    this.hemi.color.setHex(pool ? 0xc8eef4 : 0xf0e08a);
     this.renderer.toneMappingExposure =
-      0.8 - this.player.fear * 0.002 - this.hurtFlash * 0.12 - enterExposureDip(this.enterFade);
+      0.8 -
+      this.player.fear * 0.002 -
+      this.hurtFlash * 0.12 -
+      enterExposureDip(this.enterFade) +
+      (this.world.transit ? exitFlashAdd(progress) : exitRecover(this.settleAge));
 
+    const tunnelCover = this.world.transit
+      ? tunnelOverlayOpacity(tunnelProgress(this.world.transit.tunnel, this.player.x, this.player.z), this.waitingDoor)
+      : enterFadeOpacity(this.enterFade);
     document.getElementById("vignette")?.style.setProperty(
       "opacity",
-      String(0.5 + this.player.fear / 180 + prox * 0.25 + enterVignetteAdd(this.enterFade)),
+      String(
+        this.world.transit
+          ? tunnelVignette()
+          : 0.42 +
+            this.player.fear / 200 +
+            prox * 0.2 +
+            enterVignetteAdd(this.enterFade) +
+            (1 - liftAmount(this.settleAge)) * 0.18,
+      ),
     );
-    document.getElementById("door-pass")?.style.setProperty("opacity", String(enterFadeOpacity(this.enterFade)));
-    document.getElementById("static-overlay")?.style.setProperty("opacity", this.waitingDoor ? "0.07" : "0");
+    const doorPass = document.getElementById("door-pass");
+    doorPass?.classList.toggle("throat", Boolean(this.world.transit));
+    doorPass?.style.setProperty("opacity", String(tunnelCover));
+    document.getElementById("static-overlay")?.style.setProperty(
+      "opacity",
+      this.world.transit ? "0.045" : this.waitingDoor ? "0.06" : "0",
+    );
     document.getElementById("hurt")?.style.setProperty("opacity", this.hurtFlash > 0 ? String(this.hurtFlash * 0.55) : prox > 0.65 ? String((prox - 0.65) * 1.4) : "0");
-    document.getElementById("grade")?.style.setProperty("opacity", String(0.18 + this.player.fear / 280 + this.hurtFlash * 0.35));
+    document.getElementById("grade")?.style.setProperty("opacity", String(this.world.transit ? 0.08 : 0.18 + this.player.fear / 280 + this.hurtFlash * 0.35));
     document.getElementById("grade")?.classList.toggle("hurt-grade", this.hurtFlash > 0.2);
+    document.body.classList.toggle("in-throat", Boolean(this.world.transit));
   }
 
   private nudgeThroughDoor(): void {
@@ -373,9 +541,47 @@ export class Game {
     this.player.z += sz * 0.85;
   }
 
+  private placeJustInside(room: BuiltRoom): void {
+    const entry = room.doors.find((door) => door.wall === room.entryWall) ?? room.doors[0];
+    if (entry) {
+      const out = doorOutward(room, entry);
+      this.player.yaw = tunnelWalkYaw({ x: -out.x, z: -out.z });
+      this.player.pitch = 0;
+    }
+    const contained = this.world.roomAt(this.player.x, this.player.z);
+    if (contained?.id === room.id) return;
+    if (!entry) {
+      this.player.x = room.cx;
+      this.player.z = room.cz;
+      return;
+    }
+    const pos = doorWorldPos(room, entry);
+    const out = doorOutward(room, entry);
+    this.player.x = pos.x - out.x * PLACE_INSIDE_M;
+    this.player.z = pos.z - out.z * PLACE_INSIDE_M;
+    if (!this.world.roomAt(this.player.x, this.player.z)) {
+      this.player.x = room.cx;
+      this.player.z = room.cz;
+    }
+  }
+
+  private ensureInsideTunnel(tunnel: { id?: string; entry: { x: number; z: number }; dir: { x: number; z: number } }): void {
+    const id = this.world.transit?.tunnel.id ?? tunnel.id ?? "tunnel";
+    if (this.lastTransitId === id) return;
+    this.lastTransitId = id;
+    this.holdRemain = ENTER_HOLD_S;
+    this.player.x = tunnel.entry.x + tunnel.dir.x * 0.85;
+    this.player.z = tunnel.entry.z + tunnel.dir.z * 0.85;
+    this.player.yaw = tunnelWalkYaw(tunnel.dir);
+    this.player.pitch = 0;
+  }
+
   private markEntered(room: BuiltRoom): void {
     if (this.lastEnteredRoomId === room.id) return;
     this.lastEnteredRoomId = room.id;
+    this.stayRoomId = room.id;
+    this.stayRemain = 2.8;
+    this.lastTransitId = null;
     this.entity.grace = 1.8;
     this.onEnter(room);
   }
@@ -383,10 +589,15 @@ export class Game {
   private onEnter(room: BuiltRoom): void {
     this.fearFromJev = room.decision.fearIntensity;
     this.entity.onNewRoom(room, this.player);
-    this.enterFade = 1;
-    this.player.punch = Math.max(this.player.punch, 0.048);
-    this.audio.portalResolve();
+    this.enterFade = 0.22;
+    this.settleAge = 0;
+    this.holdRemain = 0;
+    const openings = room.doors
+      .filter((door) => !door.fake && !door.isFalseExit && door.wall !== room.entryWall)
+      .map((door) => doorWorldPos(room, door));
+    this.glanceSign = glanceSignFromExits(this.player.x, this.player.z, this.player.yaw, openings);
     this.audio.enterLand(room.surface);
+    this.audio.settleEmpty(room.surface);
     if (room.id !== "start") this.hint = null;
     if (room.decision.soundBait) this.audio.bait();
     const bits = [room.archetype.replaceAll("_", " "), room.decision.lighting, room.decision.ambience];
@@ -403,6 +614,7 @@ export class Game {
     if (room.decision.encounterCard === "locked_gate_needs_key") this.status += " A gate waits for red plastic.";
     if (room.decision.clueBeat === "radio_static") this.status += " A radio found a station that is not a station.";
     if (room.decision.clueBeat === "graffiti") this.status += " Someone wrote on the rule.";
+    if (room.archetype === "poolcore") this.status += " 池核. The tile is sweating.";
   }
 
   private tryExit(): void {
@@ -455,8 +667,14 @@ export class Game {
     if (this.player.flashlightOn) add -= 0.55;
     if (!this.player.flashlightOn && room.decision.lighting === "dead") add += 0.8;
     if (room.powerFlicker > 0) add += 1.6;
+    add += (room.decision.entityPressure ?? 0) * 0.12;
     if (this.player.inAlcove(this.world)) add = -3.2;
     this.player.fear = Math.min(100, Math.max(4, this.player.fear + add * dt));
+  }
+
+  private shownRoom(): BuiltRoom {
+    const entered = this.lastEnteredRoomId ? this.world.rooms.get(this.lastEnteredRoomId) : null;
+    return entered ?? this.world.current;
   }
 
   compactState(): CompactGameState {
@@ -465,7 +683,12 @@ export class Game {
       id: room.id,
       archetype: room.archetype,
       lighting: room.decision.lighting,
+      lightingMood: room.decision.lightingMood,
+      lightingStyle: room.decision.lightingStyle,
       ambience: room.decision.ambience,
+      poolcoreVariant: room.decision.poolcoreVariant,
+      humidity: room.decision.humidity,
+      exitLayout: room.decision.exitLayout,
       hazard: room.decision.hazard,
       encounter: room.decision.encounterCard,
       motif: room.decision.layoutMotif,
@@ -511,11 +734,12 @@ export class Game {
     this.enterFade = 0;
     this.hint = null;
     document.getElementById("door-pass")?.style.setProperty("opacity", "0");
+    document.body.classList.remove("in-throat");
     document.exitPointerLock();
   }
 
   private clearWorld(): void {
-    for (const room of this.world.rooms.values()) this.scene.remove(room.group);
+    this.world.detachFromScene();
     this.scene.remove(this.entity.group);
     while (this.camera.children.length > 0) this.camera.remove(this.camera.children[0]!);
   }

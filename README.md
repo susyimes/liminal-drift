@@ -54,7 +54,7 @@ Procedural Level-0 only (no asset packs). Checklist from BV1q843z1EgF:
 
 1. One yellow grade — no random UI chrome  
 2. Same frame language on title / HUD / toast / game-over  
-3. Warm fluorescents in the current room; cooler, dimmer halls next door  
+3. Warm fluorescents in the current room; cooler, dimmer halls next door; poolcore uses humid teal  
 4. Linear fog + two haze cards (warm near / cool far)  
 5. SANITY + LAMP primary; Jev line quiet  
 6. UI click ticks; layered hum / drip / air / footsteps  
@@ -79,19 +79,20 @@ Compact `player.sanity` is **stress 0–100** (same as in-game fear). The HUD sh
 
 ### Room prefetch (`purpose: "room"`)
 
-Fired when you approach an unexplored doorway (before you step through). Client waits at most **1100ms**, then falls back. The door shimmers / glitches while the answer is in flight; entering plays a resolve beat.
+Fired when you approach an unexplored doorway (before you step through). Client waits at most **1100ms**, then falls back. Crossing the jamb puts you in a short first-person **tunnel corridor**; Jev (or fallback) finishes the next room while you walk it, then you exit into the new chamber. The door shimmers / glitches while the answer is in flight.
 
-靠近未探索门洞时预取。最多等 1100ms。等待时门会静电；进门有一次氛围拍点。
+靠近未探索门洞时预取。最多等 1100ms。进门先走一段通道，Jev 在通道里生成下一间房，再走出去。等待时门会静电。
 
 | Question | Type | Options / scale | Maps to gameplay |
 | --- | --- | --- | --- |
-| `room_archetype` | Choice | `empty_office` `long_hall` `flooded_lobby` `maze_cubicles` `stairwell` `dead_end` `exit_foyer` | Geometry template |
-| `size` | Choice | `cramped` `standard` `vast` | Footprint + fog scale |
+| `room_archetype` | Choice | `empty_office` `long_hall` `flooded_lobby` `maze_cubicles` `stairwell` `dead_end` `exit_foyer` `poolcore` | Geometry template. `poolcore` is 池核: wet tile, cyan fluorescents, basin |
+| `size` | Choice | `cramped` `standard` `vast` | Footprint + fog scale (layout scale) |
 | `lighting` | Choice | `flickering` `dim` `harsh` `dead` | Fixture intensity, flicker, fog density, ambient hierarchy |
+| `lighting_mood` | Choice | `sick_yellow` `humid_teal` `cold_service` `brownout` | Color grade of the tubes (palette, not flicker) |
 | `hazard` | Choice | `none` `puddle_slip` `dark_patch` `buzzing_overload` | Slip, sanity sink, noise |
 | `layout_motif` | Choice | `open_floor` `offset_desks` `pillar_grid` `broken_symmetry` `narrow_throat` | Furniture / choke composition |
-| `exit_count` | Choice | `one` `two` `three` `four` | How many **real** outgoing doors besides entry |
-| `exit_orientation` | Choice | `ahead` `left` `right` `behind_only` `split` | Which walls get those doors |
+| `exit_count` | Choice | `one` `two` `three` `four` | How many **real** outgoing doors besides entry. Prefer two/three so rooms are junctions, not one-door teleports |
+| `exit_orientation` | Choice | `ahead` `left` `right` `behind_only` `split` | Which walls get those doors. Extra mouths are filled so “two” is never only ahead |
 | `dead_end_bait` | Noul | fake frames vs real graph | Painted/sealed throats that do not generate rooms |
 | `loot_or_clue` | Choice | `none` `battery` `keycard` `note` | Physical pickup |
 | `clue_beat` | Choice | `none` `note` `keycard` `false_exit` `graffiti` `radio_static` | Note/card guarantee, lying EXIT, wall writing, radio prop + hiss |
@@ -103,6 +104,9 @@ Fired when you approach an unexplored doorway (before you step through). Client 
 | `sound_bait` | Noul | yes / no | False wet steps / knock away from the body |
 | `ambience` | Choice | `hum` `drip` `footsteps` `silence` `whisper_static` | Layered bed (hum + air + drip + odd noises) |
 | `fear_intensity` | Score | 5 levels | Sanity drain, FOV/grade, flashlight drain |
+| `entity_pressure` | Score | 4 levels | How hunted the space feels (fear + audio), even if the body is absent |
+| `tunnel_length` | Choice | `short` `medium` `long` | First-person connector throat before the next room resolves |
+| `tunnel_mood` | Choice | `yellow_throat` `damp_service` `pool_pipe` `dark_throat` | Wallpaper / wet service / 池核 pipe / dark concrete |
 | `encounter_card` | Choice *(omitted unless warranted)* | `none` `locked_gate_needs_key` `power_flicker_event` `flooded_slow_zone` `safe_alcove` | See below |
 
 Encounter cards are **optional**. The question is only attached when compact state warrants it (depth, last card, sanity, archetype). Picking a card that is no longer legal maps to `none`.

@@ -54,7 +54,7 @@ body,
   pointer-events: none;
   position: fixed;
   inset: 0;
-  background: radial-gradient(ellipse at center, transparent 32%, rgba(0, 0, 0, 0.72) 100%);
+  background: radial-gradient(ellipse at center, transparent 28%, rgba(0, 0, 0, 0.62) 72%, rgba(0, 0, 0, 0.78) 100%);
   opacity: 0.72;
   transition: opacity 180ms linear;
 }
@@ -91,9 +91,14 @@ body,
   inset: 0;
   opacity: 0;
   background:
-    linear-gradient(90deg, rgba(5, 4, 2, 0.92) 0%, transparent 17%, transparent 83%, rgba(5, 4, 2, 0.92) 100%),
-    linear-gradient(180deg, rgba(5, 4, 2, 0.9) 0%, transparent 13%, transparent 87%, rgba(5, 4, 2, 0.9) 100%),
-    radial-gradient(ellipse 46% 58% at 50% 48%, rgba(8, 6, 3, 0.12), rgba(4, 3, 1, 0.78));
+    linear-gradient(90deg, rgba(6, 8, 8, 0.55) 0%, transparent 22%, transparent 78%, rgba(6, 8, 8, 0.55) 100%),
+    linear-gradient(180deg, rgba(6, 8, 8, 0.28) 0%, transparent 18%, transparent 84%, rgba(6, 8, 8, 0.22) 100%);
+}
+
+#door-pass.throat {
+  background:
+    linear-gradient(90deg, rgba(8, 14, 14, 0.78) 0%, transparent 30%, transparent 70%, rgba(8, 14, 14, 0.78) 100%),
+    linear-gradient(180deg, rgba(10, 16, 14, 0.32) 0%, transparent 26%, transparent 78%, rgba(8, 12, 12, 0.24) 100%);
 }
 
 #hurt {
@@ -286,6 +291,20 @@ button:hover {
 
 #hud.is-live {
   opacity: 1;
+}
+
+body.in-throat #hud .meters,
+body.in-throat #status-line,
+body.in-throat #jev-line,
+body.in-throat #key-pill,
+body.in-throat #open-hint,
+body.in-throat #pickup-toast,
+body.in-throat #btn-mute,
+body.in-throat #warn-line,
+body.in-throat #pause-hint,
+body.in-throat #crosshair {
+  opacity: 0 !important;
+  visibility: hidden;
 }
 
 .meters {
