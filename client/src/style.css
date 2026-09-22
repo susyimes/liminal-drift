@@ -85,6 +85,17 @@ body,
     repeating-linear-gradient(90deg, rgba(180, 220, 255, 0.04) 0, transparent 3px);
 }
 
+#door-pass {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  opacity: 0;
+  background:
+    linear-gradient(90deg, rgba(5, 4, 2, 0.92) 0%, transparent 17%, transparent 83%, rgba(5, 4, 2, 0.92) 100%),
+    linear-gradient(180deg, rgba(5, 4, 2, 0.9) 0%, transparent 13%, transparent 87%, rgba(5, 4, 2, 0.9) 100%),
+    radial-gradient(ellipse 46% 58% at 50% 48%, rgba(8, 6, 3, 0.12), rgba(4, 3, 1, 0.78));
+}
+
 #hurt {
   pointer-events: none;
   position: fixed;
@@ -314,6 +325,10 @@ kbd,
   letter-spacing: 0.12em;
 }
 
+.meter span {
+  white-space: nowrap;
+}
+
 .bar {
   width: min(160px, 28vw);
   height: 6px;
@@ -345,6 +360,36 @@ kbd,
 
 .pills .dim {
   opacity: 0.5;
+}
+
+#hud .pills .vibe,
+#vibe-pill {
+  font-family: "Noto Serif SC", var(--display);
+  letter-spacing: 0.06em;
+  font-size: 12px;
+  color: #f3e7a8;
+}
+
+#open-hint {
+  pointer-events: none;
+  position: absolute;
+  left: 50%;
+  top: 58%;
+  transform: translateX(-50%);
+  margin: 0;
+  max-width: 520px;
+  text-align: center;
+  font-family: "Noto Serif SC", var(--display);
+  font-size: 16px;
+  letter-spacing: 0.16em;
+  color: #e6dba4;
+  text-shadow: 0 1px 12px #000;
+  opacity: 0;
+  transition: opacity 1.35s ease;
+}
+
+#open-hint.is-on {
+  opacity: 0.88;
 }
 
 #status-line {

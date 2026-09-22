@@ -15,6 +15,8 @@ import { Player } from "./player.ts";
 import type { BuiltRoom, Door } from "./rooms.ts";
 import { doorOutward, doorWorldPos } from "./rooms.ts";
 import { World } from "./world.ts";
+import { OPENING_HINT, depthHudText, roomVibeHud } from "./copy.ts";
+import { enterExposureDip, enterFadeOpacity, enterVignetteAdd } from "./lighting.ts";
 
 export type GameMode = "title" | "playing" | "over";
 export type OverKind = "dead" | "exit" | "depth";
@@ -37,6 +39,10 @@ export type HudSnapshot = {
   encounter: string;
   ambience: string;
   exitChance: number;
+  archetype: string;
+  vibe: string;
+  depthLabel: string;
+  hint: string | null;
 };
 
 export class Game {
@@ -58,9 +64,12 @@ export class Game {
   private running = false;
   private fearFromJev = 0.4;
   private lastPickupCheck = 0;
-  private enterBeat = 0;
+  private enterFade = 0;
   private lastEnteredRoomId: string | null = null;
   private toastAge = 0;
+  private hint: string | null = null;
+  private hintAge = 0;
+  private hintChimed = false;
   private hurtFlash = 0;
   private hemi: THREE.HemisphereLight;
   private ambient: THREE.AmbientLight;
@@ -141,6 +150,7 @@ export class Game {
       const dest = this.world.current;
       this.player.x = dest.cx;
       this.player.z = dest.cz;
+      this.markEntered(dest);
     }
     return {
       kind: portal.kind,
@@ -174,9 +184,12 @@ export class Game {
     this.status = "Yellow forever. The tubes remember a building.";
     this.waitingDoor = false;
     this.fearFromJev = 0.45;
-    this.enterBeat = 0.7;
+    this.enterFade = 0.55;
     this.lastEnteredRoomId = this.world.currentId;
     this.toast = null;
+    this.hint = OPENING_HINT;
+    this.hintAge = 5.4;
+    this.hintChimed = false;
     this.clock = new THREE.Clock();
   }
 
@@ -199,6 +212,10 @@ export class Game {
       encounter: this.world.current.decision.encounterCard,
       ambience: this.world.current.decision.ambience,
       exitChance: this.world.exitChance,
+      archetype: this.world.current.archetype,
+      vibe: roomVibeHud(this.world.current.archetype),
+      depthLabel: depthHudText(this.world.roomsVisited),
+      hint: this.hint,
     };
   }
 
@@ -279,8 +296,16 @@ export class Game {
     this.audio.setProximity(prox);
     this.audio.update(dt, this.player.moving, this.player.sneak, this.player.fear, this.world.current.surface);
 
-    this.enterBeat = Math.max(0, this.enterBeat - dt * 1.15);
+    this.enterFade = Math.max(0, this.enterFade - dt * 2.15);
     this.hurtFlash = Math.max(0, this.hurtFlash - dt * 1.4);
+    if (this.hint) {
+      if (!this.hintChimed && this.hintAge < 4.55) {
+        this.hintChimed = true;
+        this.audio.hintAhead();
+      }
+      this.hintAge -= dt;
+      if (this.hintAge <= 0) this.hint = null;
+    }
     if (this.toast) {
       this.toastAge -= dt;
       if (this.toastAge <= 0) this.toast = null;
@@ -318,18 +343,20 @@ export class Game {
     }
     const nearMat = this.hazeNear.material as THREE.MeshBasicMaterial;
     const farMat = this.hazeFar.material as THREE.MeshBasicMaterial;
-    nearMat.opacity = lighting === "dead" ? 0.02 : 0.045 + this.enterBeat * 0.04;
+    nearMat.opacity = lighting === "dead" ? 0.02 : 0.045 + this.enterFade * 0.03;
     farMat.color.setHex(lighting === "dead" ? 0x1a222c : 0x3d4a58);
     farMat.opacity = 0.06 + this.player.fear * 0.0004;
     this.ambient.intensity = lighting === "harsh" ? 0.2 : lighting === "dead" ? 0.06 : 0.15;
     this.hemi.intensity = lighting === "harsh" ? 0.26 : 0.2;
-    this.renderer.toneMappingExposure = 0.8 - this.player.fear * 0.002 - this.hurtFlash * 0.12 + this.enterBeat * 0.12;
+    this.renderer.toneMappingExposure =
+      0.8 - this.player.fear * 0.002 - this.hurtFlash * 0.12 - enterExposureDip(this.enterFade);
 
-    document.getElementById("vignette")?.style.setProperty("opacity", String(0.5 + this.player.fear / 180 + prox * 0.25));
-    document.getElementById("static-overlay")?.style.setProperty(
+    document.getElementById("vignette")?.style.setProperty(
       "opacity",
-      this.waitingDoor ? "0.07" : this.enterBeat > 0 ? String(this.enterBeat * 0.04) : "0",
+      String(0.5 + this.player.fear / 180 + prox * 0.25 + enterVignetteAdd(this.enterFade)),
     );
+    document.getElementById("door-pass")?.style.setProperty("opacity", String(enterFadeOpacity(this.enterFade)));
+    document.getElementById("static-overlay")?.style.setProperty("opacity", this.waitingDoor ? "0.07" : "0");
     document.getElementById("hurt")?.style.setProperty("opacity", this.hurtFlash > 0 ? String(this.hurtFlash * 0.55) : prox > 0.65 ? String((prox - 0.65) * 1.4) : "0");
     document.getElementById("grade")?.style.setProperty("opacity", String(0.18 + this.player.fear / 280 + this.hurtFlash * 0.35));
     document.getElementById("grade")?.classList.toggle("hurt-grade", this.hurtFlash > 0.2);
@@ -356,8 +383,11 @@ export class Game {
   private onEnter(room: BuiltRoom): void {
     this.fearFromJev = room.decision.fearIntensity;
     this.entity.onNewRoom(room, this.player);
-    this.enterBeat = 1;
+    this.enterFade = 1;
+    this.player.punch = Math.max(this.player.punch, 0.048);
     this.audio.portalResolve();
+    this.audio.enterLand(room.surface);
+    if (room.id !== "start") this.hint = null;
     if (room.decision.soundBait) this.audio.bait();
     const bits = [room.archetype.replaceAll("_", " "), room.decision.lighting, room.decision.ambience];
     if (room.decision.entityPresent) bits.push(room.decision.entityBehavior.replaceAll("_", " "));
@@ -478,6 +508,9 @@ export class Game {
     this.overKind = kind;
     this.overStatus = text;
     this.status = text;
+    this.enterFade = 0;
+    this.hint = null;
+    document.getElementById("door-pass")?.style.setProperty("opacity", "0");
     document.exitPointerLock();
   }
 

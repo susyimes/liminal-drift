@@ -35,7 +35,7 @@ export function doorNeedsForcedFallback(door: {
 /**
  * Already-linked doorway: only change rooms when the player actually
  * crosses through. Standing just inside a newly spawned room must not
- * re-fire "entered" every frame (that strobed lights + enterBeat).
+ * re-fire "entered" every frame (that strobed lights + enter fade).
  *
  * `side` is the player offset along the door's outward normal
  * (positive = outside the door's room).
