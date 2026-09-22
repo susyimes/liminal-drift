@@ -15,6 +15,8 @@ export type FeelOpts = {
   fov?: number | null;
   bobMul?: number;
   shakeMul?: number;
+  smear?: number;
+  beamMul?: number;
 };
 
 export class Player {
@@ -41,6 +43,7 @@ export class Player {
   readonly flashFill: THREE.SpotLight;
   readonly flashTarget: THREE.Object3D;
   readonly beam: THREE.Mesh;
+  readonly smear: THREE.Mesh;
 
   constructor(camera: THREE.PerspectiveCamera) {
     this.camera = camera;
@@ -69,6 +72,34 @@ export class Player {
     this.beam.rotation.x = -Math.PI / 2;
     this.beam.position.set(0.12, -0.14, -4.6);
     camera.add(this.beam);
+
+    const smearCanvas = document.createElement("canvas");
+    smearCanvas.width = 64;
+    smearCanvas.height = 256;
+    const sctx = smearCanvas.getContext("2d");
+    if (sctx) {
+      const grad = sctx.createLinearGradient(0, 0, 0, 256);
+      grad.addColorStop(0, "rgba(214, 226, 222, 0)");
+      grad.addColorStop(0.5, "rgba(214, 226, 222, 0.4)");
+      grad.addColorStop(1, "rgba(214, 226, 222, 0)");
+      sctx.fillStyle = grad;
+      sctx.fillRect(28, 0, 8, 256);
+    }
+    const smearTex = new THREE.CanvasTexture(smearCanvas);
+    this.smear = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.55, 1.35),
+      new THREE.MeshBasicMaterial({
+        map: smearTex,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        fog: false,
+      }),
+    );
+    this.smear.position.set(0, -0.08, -0.72);
+    this.smear.renderOrder = 8;
+    camera.add(this.smear);
   }
 
   applyLook(dx: number, dy: number): void {
@@ -144,13 +175,20 @@ export class Player {
     this.camera.rotation.y = this.yaw + (feel.yawAdd ?? 0) + kick * 0.35;
     this.camera.rotation.x = this.pitch + (feel.pitchAdd ?? 0) + kick * 0.55;
     const fearFov = feel.fov ?? 71 + this.fear * 0.05 - (this.flashlightOn ? 0 : 1.5);
-    this.camera.fov = THREE.MathUtils.damp(this.camera.fov, clamp(fearFov, 64, 80), 4, dt);
+    const fovLo = feel.fov != null ? 54 : 64;
+    this.camera.fov = THREE.MathUtils.damp(this.camera.fov, clamp(fearFov, fovLo, 80), feel.fov != null ? 5 : 14, dt);
     this.camera.updateProjectionMatrix();
-    this.flashlight.intensity = this.flashlightOn ? 26 - this.fear * 0.06 : 0;
-    this.flashFill.intensity = this.flashlightOn ? 5.2 : 0;
+    const beamMul = feel.beamMul ?? 1;
+    this.flashlight.intensity = this.flashlightOn ? (26 - this.fear * 0.06) * beamMul : 0;
+    this.flashFill.intensity = this.flashlightOn ? 5.2 * beamMul : 0;
     this.flashlight.angle = 0.34 + (1 - this.battery / 100) * 0.08;
-    this.beam.visible = this.flashlightOn;
-    (this.beam.material as THREE.MeshBasicMaterial).opacity = this.flashlightOn ? 0.1 + (this.battery / 100) * 0.04 : 0;
+    this.beam.visible = this.flashlightOn && beamMul > 0.08;
+    this.beam.scale.setScalar(0.55 + beamMul * 0.45);
+    this.beam.position.set(0.08 * beamMul, -0.22, -4.6);
+    (this.beam.material as THREE.MeshBasicMaterial).opacity = this.flashlightOn ? (0.1 + (this.battery / 100) * 0.04) * beamMul : 0;
+    const smearMat = this.smear.material as THREE.MeshBasicMaterial;
+    smearMat.opacity = feel.smear ?? 0;
+    this.smear.visible = smearMat.opacity > 0.01;
   }
 
   forward(): THREE.Vector3 {

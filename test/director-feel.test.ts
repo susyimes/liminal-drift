@@ -28,6 +28,9 @@ import {
   tunnelPitch,
   tunnelSpeedMul,
   tunnelStrafeMul,
+  speckHexFor,
+  tunnelBreath,
+  tunnelSmearOpacity,
   tunnelVignette,
 } from "../client/src/game/directorFeel.ts";
 import { doorFrameHex, doorVeilOpacity, lightHexForMood } from "../client/src/game/lighting.ts";
@@ -66,6 +69,12 @@ test("mid-tunnel framing is head-down, longer lens, EaseInOut stride, no shake",
   assert.ok(tunnelSpeedMul(0.05) < tunnelSpeedMul(0.5));
   assert.ok(tunnelSpeedMul(0.95) < tunnelSpeedMul(0.5));
   assert.ok(tunnelVignette() >= 0.55 && tunnelVignette() <= 0.75);
+  const breath = Array.from({ length: 90 }, (_, i) => tunnelBreath(i / 60).pitch);
+  assert.ok(Math.max(...breath.map(Math.abs)) <= 0.002, "breath must stay ≤1px");
+  assert.ok(tunnelSmearOpacity(true) > tunnelSmearOpacity(false));
+  assert.ok(tunnelSmearOpacity(true) <= 0.16);
+  assert.notEqual(speckHexFor("poolcore"), speckHexFor("empty_office"));
+  assert.ok((speckHexFor("empty_office") >> 16 & 0xff) > (speckHexFor("poolcore") >> 16 & 0xff));
 });
 
 test("exit flash is a short dark then overbright, then lift", () => {

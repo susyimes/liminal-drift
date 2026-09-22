@@ -54,7 +54,7 @@ body,
   pointer-events: none;
   position: fixed;
   inset: 0;
-  background: radial-gradient(ellipse at center, transparent 32%, rgba(0, 0, 0, 0.72) 100%);
+  background: radial-gradient(ellipse at center, transparent 28%, rgba(0, 0, 0, 0.62) 72%, rgba(0, 0, 0, 0.78) 100%);
   opacity: 0.72;
   transition: opacity 180ms linear;
 }
@@ -291,6 +291,20 @@ button:hover {
 
 #hud.is-live {
   opacity: 1;
+}
+
+body.in-throat #hud .meters,
+body.in-throat #status-line,
+body.in-throat #jev-line,
+body.in-throat #key-pill,
+body.in-throat #open-hint,
+body.in-throat #pickup-toast,
+body.in-throat #btn-mute,
+body.in-throat #warn-line,
+body.in-throat #pause-hint,
+body.in-throat #crosshair {
+  opacity: 0 !important;
+  visibility: hidden;
 }
 
 .meters {

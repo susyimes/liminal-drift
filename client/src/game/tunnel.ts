@@ -4,6 +4,7 @@ import { lightHexForMood, tunnelStartupFlicker, tunnelTubeMul } from "./lighting
 import { aabbFromCenter, rotateY, type Aabb } from "./math.ts";
 import type { BuiltRoom, Door, RoomLight } from "./rooms.ts";
 import { doorOutward, doorWorldPos } from "./rooms.ts";
+import { speckHexFor } from "./directorFeel.ts";
 import { tex, tiled } from "./textures.ts";
 import { tunnelMeters } from "./transit.ts";
 
@@ -28,6 +29,7 @@ export type BuiltTunnel = {
   bounds: Aabb;
   lights: RoomLight[];
   farVeil: THREE.Mesh;
+  seamGlow: THREE.PointLight;
   surface: "carpet" | "wet" | "concrete";
   litAt: number;
 };
@@ -94,12 +96,20 @@ function moodPalette(mood: TunnelMood): {
   };
 }
 
+export function tintTunnelSpeck(tunnel: BuiltTunnel, dest?: string | null, mood?: string | null): void {
+  const hex = speckHexFor(dest, mood ?? tunnel.mood);
+  const mat = tunnel.farVeil.material;
+  if (mat instanceof THREE.MeshBasicMaterial) mat.color.setHex(hex);
+  tunnel.seamGlow.color.setHex(hex);
+}
+
 export function buildTunnel(options: {
   id: string;
   parent: BuiltRoom;
   door: Door;
   length: TunnelLength;
   mood: TunnelMood;
+  destArchetype?: string | null;
 }): BuiltTunnel {
   const length = tunnelMeters(options.length);
   const out = doorOutward(options.parent, options.door);
@@ -208,10 +218,11 @@ export function buildTunnel(options: {
     }
   }
 
+  const speck = speckHexFor(options.destArchetype, options.mood);
   const seam = new THREE.Mesh(
     new THREE.PlaneGeometry(0.07, HEIGHT * 0.52),
     new THREE.MeshBasicMaterial({
-      color: 0xe8fff8,
+      color: speck,
       transparent: true,
       opacity: 0.88,
       side: THREE.DoubleSide,
@@ -220,7 +231,7 @@ export function buildTunnel(options: {
   );
   seam.position.set(0, HEIGHT * 0.46, wallZ - 0.03);
   group.add(seam);
-  const seamGlow = new THREE.PointLight(0xd8fff4, 4.6, 3.8, 1.8);
+  const seamGlow = new THREE.PointLight(speck, 4.6, 3.8, 1.8);
   seamGlow.position.set(0, HEIGHT * 0.5, wallZ - 0.2);
   group.add(seamGlow);
   const haze = new THREE.Mesh(
@@ -292,6 +303,7 @@ export function buildTunnel(options: {
     },
     lights,
     farVeil: seam,
+    seamGlow,
     surface: palette.surface,
     litAt: 0,
   };

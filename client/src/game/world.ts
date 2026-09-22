@@ -39,7 +39,7 @@ import {
   type Pickup,
 } from "./rooms.ts";
 import { inferTunnelMood, tunnelProgress, tunnelReachedExit } from "./transit.ts";
-import { buildTunnel, updateTunnelLights, type BuiltTunnel } from "./tunnel.ts";
+import { buildTunnel, tintTunnelSpeck, updateTunnelLights, type BuiltTunnel } from "./tunnel.ts";
 import { tunnelLengthFor } from "./directorFeel.ts";
 
 export type PortalKind = "none" | "entered" | "waiting" | "exit" | "locked" | "fake" | "tunnel";
@@ -450,12 +450,14 @@ export class World {
         door,
         length,
         mood,
+        destArchetype: door.decision?.roomArchetype ?? null,
       });
     if (!existing) {
       this.tunnels.push(tunnel);
       this.scene.add(tunnel.group);
     }
     tunnel.litAt = performance.now();
+    tintTunnelSpeck(tunnel, door.decision?.roomArchetype, door.decision?.lightingMood ?? mood);
     this.transit = {
       tunnel,
       parent,
@@ -486,6 +488,13 @@ export class World {
     if (backInParent && tunnelProgress(active.tunnel, px, pz) < 0.1) {
       this.transit = null;
       return { kind: "none" };
+    }
+    if (active.door.decision) {
+      tintTunnelSpeck(
+        active.tunnel,
+        active.door.decision.roomArchetype,
+        active.door.decision.lightingMood ?? active.tunnel.mood,
+      );
     }
     if (!atExit) {
       if (active.door.generation === "pending" && !active.door.decision) {

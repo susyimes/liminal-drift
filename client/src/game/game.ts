@@ -30,8 +30,10 @@ import {
   isYellowOffice,
   exitRecover,
   liftAmount,
+  tunnelBreath,
   tunnelFov,
   tunnelPitch,
+  tunnelSmearOpacity,
   tunnelSpeedMul,
   tunnelStrafeMul,
   tunnelVignette,
@@ -303,16 +305,19 @@ export class Game {
     const destEye = eyeHeight(isPoolVibe(destArch, destMood) ? "pool" : isYellowOffice(destArch) ? "yellow" : eyeKind);
     const lift = transit ? 0 : liftAmount(this.settleAge);
     const eyeY = transit ? eyeHeight("tunnel") : eyeHeight("tunnel") + (destEye - eyeHeight("tunnel")) * lift;
+    const breath = transit ? tunnelBreath(performance.now() / 1000) : { pitch: 0, fov: 0 };
     this.player.update(dt, this.input, this.world, {
       locked: holdActive(this.holdRemain),
       speedEase: transit ? tunnelSpeedMul(progress) : controlEase(this.settleAge),
       strafeMul: transit ? tunnelStrafeMul() : 1,
       eyeY,
-      pitchAdd: transit ? tunnelPitch(progress) : 0,
+      pitchAdd: transit ? tunnelPitch(progress) + breath.pitch : 0,
       yawAdd: transit ? 0 : glanceYaw(this.settleAge, this.glanceSign),
-      fov: transit ? tunnelFov(progress) : null,
-      bobMul: transit ? 0.18 : controlEase(this.settleAge),
+      fov: transit ? tunnelFov(progress) + breath.fov : null,
+      bobMul: transit ? 0.12 : controlEase(this.settleAge),
       shakeMul: transit ? 0 : 1,
+      smear: transit ? tunnelSmearOpacity(this.player.moving || holdActive(this.holdRemain)) : 0,
+      beamMul: transit ? 0.22 : 1,
     });
 
     const containedBefore = this.world.roomAt(this.player.x, this.player.z);
@@ -513,10 +518,14 @@ export class Game {
     const doorPass = document.getElementById("door-pass");
     doorPass?.classList.toggle("throat", Boolean(this.world.transit));
     doorPass?.style.setProperty("opacity", String(tunnelCover));
-    document.getElementById("static-overlay")?.style.setProperty("opacity", this.waitingDoor ? "0.06" : "0");
+    document.getElementById("static-overlay")?.style.setProperty(
+      "opacity",
+      this.world.transit ? "0.045" : this.waitingDoor ? "0.06" : "0",
+    );
     document.getElementById("hurt")?.style.setProperty("opacity", this.hurtFlash > 0 ? String(this.hurtFlash * 0.55) : prox > 0.65 ? String((prox - 0.65) * 1.4) : "0");
-    document.getElementById("grade")?.style.setProperty("opacity", String(0.18 + this.player.fear / 280 + this.hurtFlash * 0.35));
+    document.getElementById("grade")?.style.setProperty("opacity", String(this.world.transit ? 0.08 : 0.18 + this.player.fear / 280 + this.hurtFlash * 0.35));
     document.getElementById("grade")?.classList.toggle("hurt-grade", this.hurtFlash > 0.2);
+    document.body.classList.toggle("in-throat", Boolean(this.world.transit));
   }
 
   private nudgeThroughDoor(): void {
@@ -531,9 +540,14 @@ export class Game {
   }
 
   private placeJustInside(room: BuiltRoom): void {
+    const entry = room.doors.find((door) => door.wall === room.entryWall) ?? room.doors[0];
+    if (entry) {
+      const out = doorOutward(room, entry);
+      this.player.yaw = tunnelWalkYaw({ x: -out.x, z: -out.z });
+      this.player.pitch = 0;
+    }
     const contained = this.world.roomAt(this.player.x, this.player.z);
     if (contained?.id === room.id) return;
-    const entry = room.doors.find((door) => door.wall === room.entryWall) ?? room.doors[0];
     if (!entry) {
       this.player.x = room.cx;
       this.player.z = room.cz;
@@ -713,6 +727,7 @@ export class Game {
     this.enterFade = 0;
     this.hint = null;
     document.getElementById("door-pass")?.style.setProperty("opacity", "0");
+    document.body.classList.remove("in-throat");
     document.exitPointerLock();
   }
 

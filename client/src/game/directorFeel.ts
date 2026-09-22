@@ -75,6 +75,27 @@ export function tunnelVignette(): number {
   return 0.64;
 }
 
+/** Far-door speck previews the destination color temp. */
+export function speckHexFor(dest?: string | null, mood?: string | null): number {
+  if (isPoolVibe(dest, mood) || dest === "flooded_lobby") return 0xc4eef4;
+  if (isYellowOffice(dest)) return 0xffe28a;
+  if (dest === "stairwell" || dest === "parking_ramp" || dest === "dead_end") return 0xd8a85a;
+  return 0xe4f4ee;
+}
+
+/** ≤1px breath — not a shake. */
+export function tunnelBreath(time: number): { pitch: number; fov: number } {
+  return {
+    pitch: Math.sin(time * 1.15) * 0.00085,
+    fov: Math.sin(time * 0.9 + 0.4) * 0.12,
+  };
+}
+
+/** Moderate forward smear while walking the throat. */
+export function tunnelSmearOpacity(moving: boolean): number {
+  return moving ? 0.11 : 0.03;
+}
+
 export function tunnelStrafeMul(): number {
   return 0.12;
 }
