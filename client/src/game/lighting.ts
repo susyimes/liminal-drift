@@ -55,11 +55,11 @@ export function enterVignetteAdd(enterFade: number): number {
 
 /** Static veil: unexplored throats read slightly occupied; explored stay open. */
 export function doorVeilOpacity(explored: boolean): number {
-  return explored ? 0 : 0.11;
+  return explored ? 0 : 0.22;
 }
 
 export function doorFrameHex(explored: boolean): number {
-  return explored ? 0x2c2618 : 0x6a4e1a;
+  return explored ? 0x1a2c34 : 0xc46e18;
 }
 
 /** Start-room wayfinding lamp — slow breathe, not a flicker. */

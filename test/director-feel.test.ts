@@ -18,6 +18,7 @@ import {
   holdActive,
   isPoolVibe,
   isYellowOffice,
+  exitRecover,
   liftAmount,
   splashOpacity,
   splashScale,
@@ -25,9 +26,11 @@ import {
   tunnelFov,
   tunnelLengthFor,
   tunnelPitch,
+  tunnelSpeedMul,
   tunnelStrafeMul,
+  tunnelVignette,
 } from "../client/src/game/directorFeel.ts";
-import { lightHexForMood } from "../client/src/game/lighting.ts";
+import { doorFrameHex, doorVeilOpacity, lightHexForMood } from "../client/src/game/lighting.ts";
 import { tunnelMeters, tunnelWalkSeconds } from "../client/src/game/transit.ts";
 
 test("poolcore pushes long, yellow office cuts short, walk stays 0.8–1.4s", () => {
@@ -49,16 +52,20 @@ test("enter hold is a half-second jamb beat", () => {
   assert.equal(holdActive(0), false);
 });
 
-test("mid-tunnel framing is head-down, narrow strafe, mild FOV, no shake", () => {
+test("mid-tunnel framing is head-down, longer lens, EaseInOut stride, no shake", () => {
   assert.ok(tunnelPitch(0.5) < tunnelPitch(0));
   assert.ok(tunnelPitch(0.5) < 0);
   assert.ok(tunnelStrafeMul() <= 0.15);
   const fovs = Array.from({ length: 30 }, (_, i) => tunnelFov(i / 29));
+  assert.ok(Math.max(...fovs) <= 64, "FOV should read longer-lens, not wide");
   const swing = Math.max(...fovs) - Math.min(...fovs);
   assert.ok(swing <= 5, `fov swing ${swing}`);
   let maxStep = 0;
   for (let i = 1; i < fovs.length; i += 1) maxStep = Math.max(maxStep, Math.abs(fovs[i]! - fovs[i - 1]!));
   assert.ok(maxStep < 0.6, `fov step ${maxStep} is a shake`);
+  assert.ok(tunnelSpeedMul(0.05) < tunnelSpeedMul(0.5));
+  assert.ok(tunnelSpeedMul(0.95) < tunnelSpeedMul(0.5));
+  assert.ok(tunnelVignette() >= 0.55 && tunnelVignette() <= 0.75);
 });
 
 test("exit flash is a short dark then overbright, then lift", () => {
@@ -67,7 +74,9 @@ test("exit flash is a short dark then overbright, then lift", () => {
   assert.ok(exitFlashAdd(0.9) > 0);
   assert.equal(exitFlashAdd(0.98), 0);
   assert.ok(liftAmount(0) < 0.05);
-  assert.ok(liftAmount(0.4) > 0.9);
+  assert.ok(liftAmount(0.22) > 0.9);
+  assert.ok(exitRecover(0) > 0.1);
+  assert.equal(exitRecover(0.2), 0);
 });
 
 test("settle is a 1–2s empty no-reaction beat", () => {
@@ -97,6 +106,16 @@ test("poolcore camera sits lower than yellow office", () => {
   assert.equal(isYellowOffice("empty_office"), true);
   assert.equal(isYellowOffice("hotel_hall"), true);
   assert.equal(isYellowOffice("poolcore"), false);
+});
+
+test("unexplored doors read warm; explored doors read cool and open", () => {
+  const open = doorFrameHex(true);
+  const fresh = doorFrameHex(false);
+  assert.notEqual(open, fresh);
+  assert.ok(((fresh >> 16) & 0xff) > (fresh & 0xff), "unexplored stays warm");
+  assert.ok((open & 0xff) > ((open >> 16) & 0xff), "explored goes cool");
+  assert.ok(doorVeilOpacity(false) >= 0.18);
+  assert.equal(doorVeilOpacity(true), 0);
 });
 
 test("poolcore and yellow office color temps are instantly distinct", () => {

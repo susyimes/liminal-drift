@@ -62,6 +62,7 @@ export class DriftParticles {
   }
 
   update(dt: number, player: Player, world: World, waiting: boolean): void {
+    const inTunnel = Boolean(world.transit);
     const pos = this.dust.geometry.getAttribute("position") as THREE.BufferAttribute;
     const pool = isPoolVibe(world.current.archetype, world.current.decision.lightingMood) ||
       world.transit?.tunnel.mood === "pool_pipe";
@@ -81,11 +82,12 @@ export class DriftParticles {
     pos.needsUpdate = true;
     const dustMat = this.dust.material as THREE.PointsMaterial;
     dustMat.color.setHex(pool ? 0xc8e8e4 : 0xe8d48a);
-    dustMat.opacity = player.flashlightOn ? (pool ? 0.16 : 0.26) : 0.14;
+    dustMat.opacity = inTunnel ? 0.04 : player.flashlightOn ? (pool ? 0.16 : 0.26) : 0.14;
     dustMat.size = pool ? 0.042 : 0.028;
+    this.dust.visible = !inTunnel;
 
     const hit = world.nearestDoor(player.x, player.z);
-    const pending = Boolean(waiting && hit && hit.door.generation === "pending");
+    const pending = Boolean(!inTunnel && waiting && hit && hit.door.generation === "pending");
     const portalMat = this.portal.material as THREE.PointsMaterial;
     portalMat.opacity = pending ? 0.38 : 0;
     this.portal.visible = pending;

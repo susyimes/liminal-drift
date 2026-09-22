@@ -28,10 +28,13 @@ import {
   holdActive,
   isPoolVibe,
   isYellowOffice,
+  exitRecover,
   liftAmount,
   tunnelFov,
   tunnelPitch,
+  tunnelSpeedMul,
   tunnelStrafeMul,
+  tunnelVignette,
 } from "./directorFeel.ts";
 import { enterExposureDip, enterFadeOpacity, enterVignetteAdd, tunnelFogHex, tunnelOverlayOpacity } from "./lighting.ts";
 import { tunnelProgress, tunnelWalkYaw } from "./transit.ts";
@@ -92,6 +95,8 @@ export class Game {
   private holdRemain = 0;
   private settleAge = SETTLE_S;
   private glanceSign = 0;
+  private stayRoomId: string | null = null;
+  private stayRemain = 0;
   private hurtFlash = 0;
   private hemi: THREE.HemisphereLight;
   private ambient: THREE.AmbientLight;
@@ -238,6 +243,8 @@ export class Game {
     this.holdRemain = 0;
     this.settleAge = SETTLE_S;
     this.glanceSign = 0;
+    this.stayRoomId = this.world.currentId;
+    this.stayRemain = 0;
     this.clock = new THREE.Clock();
   }
 
@@ -261,7 +268,13 @@ export class Game {
       ambience: this.world.current.decision.ambience,
       exitChance: this.world.exitChance,
       archetype: this.world.transit ? this.world.transit.tunnel.mood : this.world.current.archetype,
-      vibe: this.world.transit ? tunnelVibeHud(this.world.transit.tunnel.mood) : roomVibeHud(this.world.current.archetype),
+      vibe: this.world.transit
+        ? tunnelVibeHud(this.world.transit.tunnel.mood)
+        : roomVibeHud(
+            (this.lastEnteredRoomId
+              ? this.world.rooms.get(this.lastEnteredRoomId)
+              : null)?.archetype ?? this.world.current.archetype,
+          ),
       depthLabel: depthHudText(this.world.roomsVisited),
       hint: this.hint,
     };
@@ -292,25 +305,24 @@ export class Game {
     const eyeY = transit ? eyeHeight("tunnel") : eyeHeight("tunnel") + (destEye - eyeHeight("tunnel")) * lift;
     this.player.update(dt, this.input, this.world, {
       locked: holdActive(this.holdRemain),
-      speedEase: transit ? 1 : controlEase(this.settleAge),
+      speedEase: transit ? tunnelSpeedMul(progress) : controlEase(this.settleAge),
       strafeMul: transit ? tunnelStrafeMul() : 1,
       eyeY,
       pitchAdd: transit ? tunnelPitch(progress) : 0,
       yawAdd: transit ? 0 : glanceYaw(this.settleAge, this.glanceSign),
       fov: transit ? tunnelFov(progress) : null,
-      bobMul: transit ? 0.28 : controlEase(this.settleAge),
+      bobMul: transit ? 0.18 : controlEase(this.settleAge),
       shakeMul: transit ? 0 : 1,
     });
 
-    const contained = this.world.roomAt(this.player.x, this.player.z);
-    if (contained && !this.world.transit) this.world.currentId = contained.id;
+    const containedBefore = this.world.roomAt(this.player.x, this.player.z);
 
     const compact = this.compactState();
     void this.world.considerPrefetch(this.player.x, this.player.z, compact);
     let portal = this.world.transit
       ? this.world.advanceTransit(this.player.x, this.player.z, compact)
       : this.world.tryEnter(this.player.x, this.player.z, compact);
-    if (!this.world.transit && !contained && portal.kind === "none") {
+    if (!this.world.transit && !containedBefore && portal.kind === "none") {
       const rescued = this.world.rescueOutside(this.player.x, this.player.z, compact);
       if (rescued.kind !== "none") portal = rescued;
     }
@@ -335,8 +347,21 @@ export class Game {
       this.status = this.player.hasKeycard ? "The lock hesitates." : "The lock wants a card.";
     } else if (portal.kind === "fake") {
       this.status = "The hallway is wallpaper. Someone wanted you to believe in a door.";
-    } else if (contained && this.lastEnteredRoomId !== contained.id) {
-      this.markEntered(contained);
+    } else if (
+      containedBefore &&
+      this.lastEnteredRoomId !== containedBefore.id &&
+      !this.world.transit
+    ) {
+      this.world.currentId = containedBefore.id;
+      this.markEntered(containedBefore);
+    }
+
+    this.stayRemain = Math.max(0, this.stayRemain - dt);
+    const here = this.world.roomAt(this.player.x, this.player.z);
+    if (this.stayRemain > 0 && this.stayRoomId && !this.world.transit) {
+      this.world.currentId = this.stayRoomId;
+    } else if (here && !this.world.transit) {
+      this.world.currentId = here.id;
     }
 
     this.collect(dt);
@@ -468,14 +493,22 @@ export class Game {
       this.player.fear * 0.002 -
       this.hurtFlash * 0.12 -
       enterExposureDip(this.enterFade) +
-      exitFlashAdd(progress);
+      (this.world.transit ? exitFlashAdd(progress) : exitRecover(this.settleAge));
 
     const tunnelCover = this.world.transit
       ? tunnelOverlayOpacity(tunnelProgress(this.world.transit.tunnel, this.player.x, this.player.z), this.waitingDoor)
       : enterFadeOpacity(this.enterFade);
     document.getElementById("vignette")?.style.setProperty(
       "opacity",
-      String(0.42 + this.player.fear / 200 + prox * 0.2 + enterVignetteAdd(this.enterFade)),
+      String(
+        this.world.transit
+          ? tunnelVignette()
+          : 0.42 +
+            this.player.fear / 200 +
+            prox * 0.2 +
+            enterVignetteAdd(this.enterFade) +
+            (1 - liftAmount(this.settleAge)) * 0.18,
+      ),
     );
     const doorPass = document.getElementById("door-pass");
     doorPass?.classList.toggle("throat", Boolean(this.world.transit));
@@ -530,6 +563,8 @@ export class Game {
   private markEntered(room: BuiltRoom): void {
     if (this.lastEnteredRoomId === room.id) return;
     this.lastEnteredRoomId = room.id;
+    this.stayRoomId = room.id;
+    this.stayRemain = 2.8;
     this.lastTransitId = null;
     this.entity.grace = 1.8;
     this.onEnter(room);

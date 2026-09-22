@@ -50,10 +50,29 @@ export function tunnelPitch(progress: number): number {
   return -0.07 - Math.sin(Math.min(1, Math.max(0, progress)) * Math.PI) * 0.03;
 }
 
-/** Mild FOV drift from repetition — not a shake. */
+/** Longer-lens mid-throat, then a short recover. Not a shake. */
 export function tunnelFov(progress: number): number {
   const p = Math.min(1, Math.max(0, progress));
-  return 67.5 + Math.sin(p * Math.PI) * 2.4;
+  return 58.5 + Math.sin(p * Math.PI) * 2.1;
+}
+
+/** EaseInOut stride: ~0.25s in, cruise, ~0.15s micro-decel. */
+export function tunnelSpeedMul(progress: number): number {
+  const p = Math.min(1, Math.max(0, progress));
+  if (p < 0.22) {
+    const t = p / 0.22;
+    return t * t * (3 - 2 * t);
+  }
+  if (p > 0.86) {
+    const t = (1 - p) / 0.14;
+    return 0.42 + t * t * (3 - 2 * t) * 0.58;
+  }
+  return 1;
+}
+
+/** Edge falloff so the vanishing speck sits in a readable ellipse. */
+export function tunnelVignette(): number {
+  return 0.64;
 }
 
 export function tunnelStrafeMul(): number {
@@ -61,19 +80,27 @@ export function tunnelStrafeMul(): number {
 }
 
 /**
- * 1–2 frames of dark then overbright at the far threshold.
- * Values are exposure *add* (negative = darker).
+ * 2–3 frames of cool-white overbright at the far threshold, after a brief dark.
+ * Recover is handled by `exitRecover` once the room loads.
  */
 export function exitFlashAdd(progress: number): number {
   const p = Math.min(1, Math.max(0, progress));
-  if (p < 0.8 || p > 0.94) return 0;
-  if (p < 0.86) return -0.22;
-  return 0.16;
+  if (p < 0.8 || p > 0.9) return 0;
+  if (p < 0.845) return -0.2;
+  return 0.28;
 }
 
-/** Camera lift 0→1 after leaving the throat. */
+/** 0.12–0.18s exposure recover after the exit flash. */
+export function exitRecover(sinceLand: number): number {
+  if (sinceLand <= 0) return 0.22;
+  if (sinceLand >= 0.16) return 0;
+  const t = 1 - sinceLand / 0.16;
+  return t * t * 0.22;
+}
+
+/** Camera / FOV / vignette return in ~0.2s after leaving the throat. */
 export function liftAmount(sinceLand: number): number {
-  const t = Math.min(1, Math.max(0, sinceLand / 0.38));
+  const t = Math.min(1, Math.max(0, sinceLand / 0.2));
   return t * t * (3 - 2 * t);
 }
 
