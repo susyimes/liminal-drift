@@ -269,6 +269,7 @@ export class Game {
     this.audio.setTunnel(Boolean(this.world.transit), this.world.transit?.tunnel.mood ?? "yellow_throat");
     if (portal.kind === "tunnel" && portal.tunnel && this.world.transit) {
       this.ensureInsideTunnel(portal.tunnel);
+      this.hint = null;
       this.status = this.waitingDoor
         ? "The throat is still inventing the next room."
         : "A connecting hall. Keep walking.";
