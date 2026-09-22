@@ -15,7 +15,7 @@ import { Player } from "./player.ts";
 import type { BuiltRoom, Door } from "./rooms.ts";
 import { doorOutward, doorWorldPos } from "./rooms.ts";
 import { World } from "./world.ts";
-import { OPENING_HINT, depthHudText, roomVibeHud, tunnelVibeHud } from "./copy.ts";
+import { OPENING_HINT, depthHudText, hudVibeArchetype, roomVibeHud, tunnelVibeHud } from "./copy.ts";
 import {
   ENTER_HOLD_S,
   PLACE_INSIDE_M,
@@ -269,13 +269,15 @@ export class Game {
       encounter: this.world.current.decision.encounterCard,
       ambience: this.world.current.decision.ambience,
       exitChance: this.world.exitChance,
-      archetype: this.world.transit ? this.world.transit.tunnel.mood : this.world.current.archetype,
+      archetype: this.world.transit ? this.world.transit.tunnel.mood : this.shownRoom().archetype,
       vibe: this.world.transit
         ? tunnelVibeHud(this.world.transit.tunnel.mood)
         : roomVibeHud(
-            (this.lastEnteredRoomId
-              ? this.world.rooms.get(this.lastEnteredRoomId)
-              : null)?.archetype ?? this.world.current.archetype,
+            hudVibeArchetype(
+              this.world.rooms.get(this.lastEnteredRoomId ?? "")?.archetype,
+              this.world.roomAt(this.player.x, this.player.z)?.archetype,
+              this.world.current.archetype,
+            ),
           ),
       depthLabel: depthHudText(this.world.roomsVisited),
       hint: this.hint,
@@ -668,6 +670,11 @@ export class Game {
     add += (room.decision.entityPressure ?? 0) * 0.12;
     if (this.player.inAlcove(this.world)) add = -3.2;
     this.player.fear = Math.min(100, Math.max(4, this.player.fear + add * dt));
+  }
+
+  private shownRoom(): BuiltRoom {
+    const entered = this.lastEnteredRoomId ? this.world.rooms.get(this.lastEnteredRoomId) : null;
+    return entered ?? this.world.current;
   }
 
   compactState(): CompactGameState {

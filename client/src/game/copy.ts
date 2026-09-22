@@ -31,6 +31,15 @@ export function roomVibeHud(archetype: RoomArchetype | string): string {
   return `${roomVibeZh(archetype)} · ${archetype}`;
 }
 
+/** HUD vibe follows the room just entered, not a jamb-overlap currentId. */
+export function hudVibeArchetype(
+  lastEnteredArchetype: string | null | undefined,
+  occupyingArchetype: string | null | undefined,
+  currentArchetype: string,
+): string {
+  return lastEnteredArchetype ?? occupyingArchetype ?? currentArchetype;
+}
+
 export function depthHudText(depth: number): string {
   return `深度 DEPTH ${depth}`;
 }

@@ -15,6 +15,7 @@ import {
   doorFrameHex,
   doorGlitchOpacity,
   doorShimmerOpacity,
+  doorVeilHex,
   doorVeilOpacity,
   lightHexForMood,
   startGuideMul,
@@ -294,8 +295,11 @@ export class World {
         const markable = !door.fake && !door.isFalseExit && !door.isExit && !door.locked;
         const veilOpacity = markable ? doorVeilOpacity(connected) : 0;
         if (door.veil.visible !== veilOpacity > 0) door.veil.visible = veilOpacity > 0;
-        (door.veil.material as THREE.MeshBasicMaterial).opacity = veilOpacity;
+        const veilMat = door.veil.material as THREE.MeshBasicMaterial;
+        veilMat.opacity = veilOpacity;
         if (markable) {
+          const veilHex = doorVeilHex(connected);
+          if (veilMat.color.getHex() !== veilHex) veilMat.color.setHex(veilHex);
           const hex = doorFrameHex(connected);
           for (const frame of door.frames) {
             const mat = frame.material as THREE.MeshStandardMaterial;

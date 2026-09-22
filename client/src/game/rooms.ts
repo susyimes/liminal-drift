@@ -335,7 +335,17 @@ function makeDoorVisuals(
     doorH,
     wall === "n" || wall === "s" ? 0.22 : 0.1,
   );
-  const frames = [left, right];
+  const lintel = addBox(
+    group,
+    frameMat,
+    pos.x,
+    doorH + 0.06,
+    pos.z,
+    wall === "n" || wall === "s" ? doorW + 0.28 : 0.22,
+    0.12,
+    wall === "n" || wall === "s" ? 0.22 : doorW + 0.28,
+  );
+  const frames = [left, right, lintel];
 
   const yaw = wall === "e" ? -Math.PI / 2 : wall === "w" ? Math.PI / 2 : wall === "s" ? Math.PI : 0;
   const shimmerMat = new THREE.MeshBasicMaterial({
@@ -366,9 +376,9 @@ function makeDoorVisuals(
   group.add(glitch);
 
   const veilMat = new THREE.MeshBasicMaterial({
-    color: opts.bait ? 0xf0e08a : opts.safer ? 0x0c1012 : 0x1c1408,
+    color: opts.bait ? 0xf0e08a : opts.safer ? 0x0c1012 : 0xd47820,
     transparent: true,
-    opacity: kind === "real" ? (opts.bait ? 0.2 : opts.safer ? 0.06 : 0.11) : 0,
+    opacity: kind === "real" ? (opts.bait ? 0.28 : opts.safer ? 0.08 : 0.32) : 0,
     side: THREE.DoubleSide,
     depthWrite: false,
   });
