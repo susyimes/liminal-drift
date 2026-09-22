@@ -170,11 +170,11 @@ function ceilingTiles(): THREE.CanvasTexture {
 
 function tileWall(): THREE.CanvasTexture {
   const { c, ctx } = canvas(512);
-  ctx.fillStyle = "#dceeee";
+  ctx.fillStyle = "#c8d4d2";
   ctx.fillRect(0, 0, 512, 512);
-  const grout = 5;
-  ctx.fillStyle = "#b8a060";
-  for (let i = 0; i <= 512; i += 96) {
+  const grout = 7;
+  ctx.fillStyle = "#3a4448";
+  for (let i = 0; i <= 512; i += 128) {
     ctx.fillRect(i - grout / 2, 0, grout, 512);
     ctx.fillRect(0, i - grout / 2, 512, grout);
   }
@@ -182,23 +182,24 @@ function tileWall(): THREE.CanvasTexture {
   for (let y = 0; y < 512; y += 1) {
     for (let x = 0; x < 512; x += 1) {
       const i = (y * 512 + x) * 4;
-      const stain = Math.max(0, fbm(x / 90, y / 70, 61) - 0.58) * 48;
-      const grit = (hash(x, y, 61) - 0.5) * 10;
-      const yellow = Math.max(0, fbm(x / 120, y / 40, 88) - 0.55) * 36;
-      img.data[i] = Math.max(0, Math.min(255, (img.data[i] ?? 200) - stain * 0.25 + yellow + grit));
-      img.data[i + 1] = Math.max(0, Math.min(255, (img.data[i + 1] ?? 220) - stain * 0.08 + yellow * 0.55 + grit));
-      img.data[i + 2] = Math.max(0, Math.min(255, (img.data[i + 2] ?? 220) + stain * 0.12 - yellow * 0.4 + grit));
+      const stain = Math.max(0, fbm(x / 90, y / 70, 61) - 0.58) * 42;
+      const grit = (hash(x, y, 61) - 0.5) * 9;
+      const mold = Math.max(0, fbm(x / 40, y / 38, 19) - 0.68) * 50;
+      img.data[i] = Math.max(0, Math.min(255, (img.data[i] ?? 200) - stain * 0.2 - mold * 0.35 + grit));
+      img.data[i + 1] = Math.max(0, Math.min(255, (img.data[i + 1] ?? 212) - stain * 0.08 - mold * 0.1 + grit));
+      img.data[i + 2] = Math.max(0, Math.min(255, (img.data[i + 2] ?? 214) + stain * 0.08 - mold * 0.22 + grit));
     }
   }
   ctx.putImageData(img, 0, 0);
-  ctx.fillStyle = "rgba(70, 90, 40, 0.22)";
+  ctx.fillStyle = "rgba(90, 108, 104, 0.34)";
   ctx.beginPath();
-  ctx.ellipse(20, 490, 70, 46, 0.2, 0, Math.PI * 2);
+  ctx.ellipse(28, 486, 22, 16, 0.2, 0, Math.PI * 2);
   ctx.fill();
+  ctx.fillStyle = "rgba(50, 72, 68, 0.28)";
   ctx.beginPath();
-  ctx.ellipse(500, 20, 56, 40, 0.4, 0, Math.PI * 2);
+  ctx.ellipse(390, 140, 18, 12, 0.4, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = "rgba(30, 80, 90, 0.12)";
+  ctx.fillStyle = "rgba(40, 70, 66, 0.16)";
   ctx.beginPath();
   ctx.ellipse(180, 220, 90, 36, 0.3, 0, Math.PI * 2);
   ctx.fill();
@@ -207,21 +208,22 @@ function tileWall(): THREE.CanvasTexture {
 
 function tileFloor(): { map: THREE.CanvasTexture; rough: THREE.CanvasTexture } {
   const { c, ctx } = canvas(512);
-  ctx.fillStyle = "#c8e6e8";
+  ctx.fillStyle = "#c4d2d0";
   ctx.fillRect(0, 0, 512, 512);
-  ctx.fillStyle = "#c4a45a";
-  for (let i = 0; i <= 512; i += 80) {
-    ctx.fillRect(i - 2, 0, 4, 512);
-    ctx.fillRect(0, i - 2, 512, 4);
+  ctx.fillStyle = "#2e3a3e";
+  for (let i = 0; i <= 512; i += 128) {
+    ctx.fillRect(i - 3, 0, 6, 512);
+    ctx.fillRect(0, i - 3, 512, 6);
   }
   const img = ctx.getImageData(0, 0, 512, 512);
   for (let y = 0; y < 512; y += 1) {
     for (let x = 0; x < 512; x += 1) {
       const wet = Math.max(0, fbm(x / 50, y / 50, 77) - 0.4);
+      const chip = hash(x, y, 41) > 0.993 ? 28 : 0;
       const i = (y * 512 + x) * 4;
-      img.data[i] = Math.max(0, Math.min(255, (img.data[i] ?? 180) - wet * 20));
-      img.data[i + 1] = Math.max(0, Math.min(255, (img.data[i + 1] ?? 210) + wet * 8));
-      img.data[i + 2] = Math.max(0, Math.min(255, (img.data[i + 2] ?? 210) + wet * 16));
+      img.data[i] = Math.max(0, Math.min(255, (img.data[i] ?? 180) - wet * 16 - chip));
+      img.data[i + 1] = Math.max(0, Math.min(255, (img.data[i + 1] ?? 210) + wet * 6 - chip * 0.5));
+      img.data[i + 2] = Math.max(0, Math.min(255, (img.data[i + 2] ?? 210) + wet * 10 - chip * 0.3));
     }
   }
   ctx.putImageData(img, 0, 0);
@@ -248,11 +250,12 @@ function poolWater(): THREE.CanvasTexture {
   for (let y = 0; y < 256; y += 1) {
     for (let x = 0; x < 256; x += 1) {
       const n = fbm(x / 22, y / 22, 33);
-      const lane = Math.abs(((x + 8) % 64) - 32) < 2 ? 18 : 0;
+      const depth = y / 255;
+      const lane = Math.abs(((x + 8) % 48) - 24) < 1.6 ? 36 : 0;
       const i = (y * 256 + x) * 4;
-      img.data[i] = 28 + n * 22 + lane;
-      img.data[i + 1] = 120 + n * 50;
-      img.data[i + 2] = 140 + n * 55;
+      img.data[i] = 18 + n * 16 + lane * 0.35;
+      img.data[i + 1] = 118 + n * 40 - depth * 36 + lane * 0.55;
+      img.data[i + 2] = 132 + n * 36 - depth * 18 + lane;
       img.data[i + 3] = 255;
     }
   }

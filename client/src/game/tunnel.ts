@@ -123,7 +123,7 @@ export function buildTunnel(options: {
     const water = new THREE.Mesh(
       new THREE.PlaneGeometry(WIDTH - 0.28, length - 0.28),
       std({
-        color: options.mood === "pool_pipe" ? 0x2a8898 : 0x2d4036,
+        color: options.mood === "pool_pipe" ? 0x1a6a62 : 0x2d4036,
         map: options.mood === "pool_pipe" ? tex.poolWater : tex.water,
         transparent: true,
         opacity: 0.3,

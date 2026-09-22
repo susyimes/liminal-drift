@@ -69,14 +69,14 @@ export function startGuideMul(time: number): number {
 
 /** Fixture color grade. Mood is palette; flicker/dim stays separate. */
 export function lightHexForMood(mood: LightingMood | string, here: boolean): number {
-  if (mood === "humid_teal") return here ? 0xb6fff6 : 0x4a8a86;
+  if (mood === "humid_teal") return here ? 0xd4eef6 : 0x3e6a72;
   if (mood === "cold_service") return here ? 0xd4e2ee : 0x6a7c88;
   if (mood === "brownout") return here ? 0xd0a85a : 0x5a4a28;
   return here ? 0xfff1b0 : 0x8fa0b4;
 }
 
 export function tubeEmissiveHex(mood: LightingMood | string): number {
-  if (mood === "humid_teal") return 0xa8fff4;
+  if (mood === "humid_teal") return 0xc8e8f2;
   if (mood === "cold_service") return 0xdce8f4;
   if (mood === "brownout") return 0xe0b86a;
   return 0xfff1b0;

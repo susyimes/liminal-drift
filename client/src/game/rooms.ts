@@ -19,6 +19,7 @@ import {
   type Wall,
 } from "./math.ts";
 import { initialDoorGeneration } from "./doors.ts";
+import { tileRepeat } from "./directorFeel.ts";
 import { makeGraffitiTexture, tex, tiled } from "./textures.ts";
 
 export type PickupKind = "battery" | "keycard" | "note";
@@ -141,30 +142,34 @@ const mats = {
   trim: std({ color: 0x6b5420, roughness: 0.75 }),
   bars: std({ color: 0x2a2c28, roughness: 0.35, metalness: 0.7 }),
   alcove: std({ color: 0xc4b24a, map: tex.wall, roughness: 0.86 }),
-  tile: std({ color: 0xd4ecec, map: tex.tileWall, roughness: 0.32, metalness: 0.08 }),
+  tile: std({ color: 0xc8d4d2, map: tex.tileWall, roughness: 0.36, metalness: 0.06 }),
   tileFloor: std({
-    color: 0xb8e0e4,
+    color: 0xb8ccc8,
     map: tex.tileFloor,
     roughnessMap: tex.tileFloorRough,
-    roughness: 0.14,
-    metalness: 0.2,
+    roughness: 0.16,
+    metalness: 0.16,
   }),
   pool: std({
-    color: 0x1f6f7c,
+    color: 0x1a6a62,
     map: tex.poolWater,
     transparent: true,
-    opacity: 0.52,
+    opacity: 0.56,
     roughness: 0.08,
     metalness: 0.28,
   }),
   puddle: std({
-    color: 0x6ec4c8,
+    color: 0x3e9a86,
     map: tex.poolWater,
     transparent: true,
-    opacity: 0.38,
+    opacity: 0.4,
     roughness: 0.06,
-    metalness: 0.35,
+    metalness: 0.32,
   }),
+  rust: std({ color: 0x6a3a1e, roughness: 0.82, metalness: 0.22 }),
+  ring: std({ color: 0xe85a18, roughness: 0.42, metalness: 0.12 }),
+  extinguisher: std({ color: 0xb82018, roughness: 0.48, metalness: 0.18 }),
+  kick: std({ color: 0xc45a20, roughness: 0.7 }),
   locker: std({ color: 0x8aa0a4, roughness: 0.45, metalness: 0.35 }),
   chalk: std({ color: 0x2a3a32, roughness: 0.92 }),
   plastic: std({ color: 0xc8d0c4, transparent: true, opacity: 0.28, roughness: 0.2 }),
@@ -409,22 +414,24 @@ function addLight(
   decision: RoomDecision,
   forceDead = false,
 ): void {
-  addBox(group, mats.metal, x, HEIGHT - 0.04, z, 1.7, 0.08, 0.38);
   const style = decision.lightingStyle ?? (decision.lighting === "dead" ? "almost_dark" : decision.lighting === "dim" ? "half_dead" : decision.lighting === "flickering" ? "flicker" : "steady_cool");
   const live = !forceDead && decision.lighting !== "dead" && style !== "almost_dark";
   const poolVibe = decision.roomArchetype === "poolcore" || decision.lightingMood === "humid_teal";
   const cool = style === "steady_cool" || poolVibe;
-  const emissive = poolVibe ? 0xa8fff4 : cool || decision.lightingMood === "cold_service" ? 0xdce8f4 : decision.lightingMood === "brownout" ? 0xe0b86a : 0xfff1b0;
+  const emissive = poolVibe ? 0xc8e8f2 : cool || decision.lightingMood === "cold_service" ? 0xdce8f4 : decision.lightingMood === "brownout" ? 0xe0b86a : 0xfff1b0;
+  const barW = poolVibe ? 2.55 : 1.7;
+  const barD = poolVibe ? 0.16 : 0.38;
+  addBox(group, mats.metal, x, HEIGHT - 0.04, z, barW, 0.08, barD);
   const tubeMat = live
     ? new THREE.MeshStandardMaterial({
-        color: poolVibe || cool ? 0xd8fff8 : 0xfff6d0,
+        color: poolVibe || cool ? 0xd4eef6 : 0xfff6d0,
         emissive,
         emissiveIntensity: 1.4,
         roughness: 0.25,
         metalness: 0.1,
       })
     : mats.lightDead;
-  const tube = addBox(group, tubeMat, x, HEIGHT - 0.1, z, 1.45, 0.04, 0.16);
+  const tube = addBox(group, tubeMat, x, HEIGHT - 0.1, z, poolVibe ? 2.35 : 1.45, 0.035, poolVibe ? 0.1 : 0.16);
   if (live) {
     const light = new THREE.PointLight(emissive, intensity, 14, 1.45);
     light.position.set(x, HEIGHT - 0.32, z);
@@ -520,6 +527,13 @@ function decorate(
       colliders.push(aabbFromCenter(pos[0], 0.55, pos[1], 0.7, 0.55, 0.36));
     }
     if (motif !== "broken_symmetry") addBox(group, mats.metal, w * 0.28, 0.7, -d * 0.3, 0.28, 1.1, 0.28);
+    stain(w * 0.18, d * 0.22, 0.85);
+    stain(-w * 0.24, -d * 0.16, 0.55);
+    addBox(group, mats.dark, -w * 0.46, 1.4, 0, 0.02, 2.4, 0.02);
+    addBox(group, mats.dark, w * 0.46, 1.4, d * 0.08, 0.02, 2.4, 0.02);
+    addBox(group, mats.extinguisher, w / 2 - 0.18, 0.72, d * 0.18, 0.16, 0.72, 0.16);
+    addBox(group, mats.paper, w / 2 - 0.2, 1.18, d * 0.18, 0.08, 0.1, 0.12);
+    addBox(group, mats.dark, w / 2 - 0.21, 1.18, d * 0.18, 0.02, 0.04, 0.08);
   }
 
   if (archetype === "flooded_lobby" || decision.encounterCard === "flooded_slow_zone" || decision.hazard === "puddle_slip") {
@@ -534,6 +548,7 @@ function decorate(
   }
 
   if (archetype === "maze_cubicles") {
+    addBox(group, mats.extinguisher, w / 2 - 0.2, 0.7, -d * 0.28, 0.14, 0.68, 0.14);
     const cols = Math.max(3, Math.floor(w / 2.4));
     const rows = Math.max(3, Math.floor(d / 2.4));
     const cw = w / cols;
@@ -664,10 +679,40 @@ function decorate(
       }
     }
     if (archetype === "poolcore" && variant !== "locker_room") {
-      addBox(group, mats.tile, -w * 0.32, 1.2, d * 0.28, 0.42, 2.4, 0.42);
-      addBox(group, mats.tile, w * 0.3, 1.2, -d * 0.22, 0.42, 2.4, 0.42);
-      colliders.push(aabbFromCenter(-w * 0.32, 1.2, d * 0.28, 0.24, 1.2, 0.24));
-      colliders.push(aabbFromCenter(w * 0.3, 1.2, -d * 0.22, 0.24, 1.2, 0.24));
+      const colX = w * 0.3;
+      const colZ = d * 0.26;
+      addBox(group, mats.tile, -colX, 1.2, -colZ, 0.42, 2.4, 0.42);
+      addBox(group, mats.tile, colX, 1.2, -colZ, 0.42, 2.4, 0.42);
+      addBox(group, mats.tile, -colX, 1.2, colZ, 0.42, 2.4, 0.42);
+      addBox(group, mats.tile, colX, 1.2, colZ, 0.42, 2.4, 0.42);
+      colliders.push(aabbFromCenter(-colX, 1.2, -colZ, 0.24, 1.2, 0.24));
+      colliders.push(aabbFromCenter(colX, 1.2, -colZ, 0.24, 1.2, 0.24));
+      colliders.push(aabbFromCenter(-colX, 1.2, colZ, 0.24, 1.2, 0.24));
+      colliders.push(aabbFromCenter(colX, 1.2, colZ, 0.24, 1.2, 0.24));
+    }
+    addBox(group, mats.rust, w * 0.36, 0.04, d * 0.36, 0.55, 0.04, 0.55);
+    addBox(group, mats.dark, w * 0.36, 0.055, d * 0.36, 0.38, 0.02, 0.38);
+    const bubble = new THREE.Mesh(
+      new THREE.CircleGeometry(0.07, 8),
+      new THREE.MeshBasicMaterial({ color: 0xa8d8d0, transparent: true, opacity: 0.28, depthWrite: false }),
+    );
+    bubble.rotation.x = -Math.PI / 2;
+    bubble.position.set(w * 0.36, 0.09, d * 0.36);
+    group.add(bubble);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.065, 8, 18), mats.ring);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.set(-w * 0.38, 1.12, -d * 0.4);
+    group.add(ring);
+    addBox(group, mats.ring, -w * 0.38, 1.12, -d * 0.4, 0.08, 0.08, 0.08);
+    const inward = { n: { x: 0, z: -1 }, s: { x: 0, z: 1 }, e: { x: -1, z: 0 }, w: { x: 1, z: 0 } }[entryLocal];
+    for (let i = 0; i < 5; i += 1) {
+      const mesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.16, 0.28),
+        std({ color: 0x4a5550, transparent: true, opacity: 0.22 - i * 0.03, roughness: 0.35 }),
+      );
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.set(inward.x * (0.6 + i * 0.42) + (i % 2) * 0.16, 0.021, inward.z * (0.6 + i * 0.42));
+      group.add(mesh);
     }
     const drops = new THREE.Mesh(
       new THREE.PlaneGeometry(w * 0.8, d * 0.8),
@@ -683,16 +728,16 @@ function decorate(
     drops.position.y = HEIGHT - 0.02;
     group.add(drops);
     const haze = new THREE.Mesh(
-      new THREE.PlaneGeometry(w * 0.9, 1.6),
+      new THREE.PlaneGeometry(w * 0.92, d * 0.92),
       new THREE.MeshBasicMaterial({
-        color: 0x8ef0ea,
+        color: 0xd8eeea,
         transparent: true,
-        opacity: decision.humidity === "heavy" ? 0.07 : 0.045,
+        opacity: decision.humidity === "heavy" ? 0.08 : 0.05,
         depthWrite: false,
       }),
     );
-    haze.position.set(0, 1.4, 0);
-    haze.rotation.x = -0.12;
+    haze.rotation.x = -Math.PI / 2;
+    haze.position.set(0, 0.22, 0);
     group.add(haze);
   }
 
@@ -702,6 +747,8 @@ function decorate(
       addBox(group, mats.paper, w / 2 - 0.14, 1.7, z, 0.01, 0.16, 0.28);
     }
     addBox(group, mats.desk, 0, 0.45, 0, 0.7, 0.9, 0.7);
+    addBox(group, mats.extinguisher, w / 2 - 0.16, 0.7, -d * 0.12, 0.14, 0.68, 0.14);
+    stain(0.4, d * 0.2, 0.7);
   }
 
   if (archetype === "parking_ramp") {
@@ -827,8 +874,10 @@ export function buildRoom(options: {
         : archetype === "parking_ramp" || archetype === "machine_room"
           ? mats.wallConcrete.clone()
           : mats.carpet.clone();
-  if (floorMat.map) floorMat.map = tiled(floorMat.map, w / 3.2, d / 3.2);
-  if (floorMat.roughnessMap) floorMat.roughnessMap = tiled(floorMat.roughnessMap, w / 3.2, d / 3.2);
+  const floorRepX = archetype === "poolcore" || (decision.poolcoreVariant ?? "none") !== "none" ? tileRepeat(w) : w / 3.2;
+  const floorRepZ = archetype === "poolcore" || (decision.poolcoreVariant ?? "none") !== "none" ? tileRepeat(d) : d / 3.2;
+  if (floorMat.map) floorMat.map = tiled(floorMat.map, floorRepX, floorRepZ);
+  if (floorMat.roughnessMap) floorMat.roughnessMap = tiled(floorMat.roughnessMap, floorRepX, floorRepZ);
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(w, d), floorMat);
   floor.rotation.x = -Math.PI / 2;
   group.add(floor);
@@ -861,14 +910,20 @@ export function buildRoom(options: {
       hasOpening && sideWalls.has(wall) && !bait ? (wall === "n" || wall === "s" ? w : d) * 0.2 : 0;
     for (const seg of wallSegments(wall, w, d, hasOpening, along)) {
       const wmat = wallMaterial(archetype).clone();
-      if (wmat.map) wmat.map = tiled(wmat.map, Math.max(seg.sx, seg.sz) / 2.2, HEIGHT / 2.4);
+      if (wmat.map) {
+        const along = Math.max(seg.sx, seg.sz);
+        wmat.map =
+          archetype === "poolcore"
+            ? tiled(wmat.map, tileRepeat(along), tileRepeat(HEIGHT))
+            : tiled(wmat.map, along / 2.2, HEIGHT / 2.4);
+      }
       addBox(group, wmat, seg.x, HEIGHT / 2, seg.z, seg.sx, HEIGHT, seg.sz);
       collidersLocal.push(aabbFromCenter(seg.x, HEIGHT / 2, seg.z, seg.sx / 2, HEIGHT / 2, seg.sz / 2));
     }
     const mid = wall === "n" || wall === "s" ? { x: 0, z: wall === "n" ? d / 2 : -d / 2 } : { x: wall === "e" ? w / 2 : -w / 2, z: 0 };
     addBox(
       group,
-      mats.trim,
+      archetype === "poolcore" ? mats.kick : mats.trim,
       mid.x,
       0.08,
       mid.z,

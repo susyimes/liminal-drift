@@ -40,6 +40,7 @@ import {
 } from "./rooms.ts";
 import { inferTunnelMood, tunnelProgress, tunnelReachedExit } from "./transit.ts";
 import { buildTunnel, updateTunnelLights, type BuiltTunnel } from "./tunnel.ts";
+import { tunnelLengthFor } from "./directorFeel.ts";
 
 export type PortalKind = "none" | "entered" | "waiting" | "exit" | "locked" | "fake" | "tunnel";
 
@@ -313,7 +314,7 @@ export class World {
       for (const puddle of room.puddles) {
         const mat = puddle.material;
         if (mat instanceof THREE.MeshStandardMaterial) {
-          mat.opacity = 0.32 + Math.sin(time * 1.4 + puddle.position.x) * 0.05;
+          mat.opacity = 0.34 + Math.sin(time * 0.55 + puddle.position.x) * 0.04;
         }
       }
     }
@@ -437,7 +438,7 @@ export class World {
     }
 
     const existing = this.tunnels.find((item) => item.parentDoorId === door.id);
-    const length = door.decision?.tunnelLength ?? "medium";
+    const length = tunnelLengthFor(door.decision?.roomArchetype, door.decision?.tunnelLength);
     const mood =
       door.decision?.tunnelMood ??
       inferTunnelMood(parent.archetype, door.decision?.roomArchetype ?? null);

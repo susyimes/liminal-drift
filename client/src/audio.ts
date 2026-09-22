@@ -218,6 +218,28 @@ export class AudioEngine {
     osc.stop(t + 0.34);
   }
 
+  /** Empty 1–2s beat after a room change — wind / ripple, never a sting. */
+  settleEmpty(surface: "carpet" | "wet" | "concrete" = "carpet"): void {
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(surface === "wet" ? 92 : 48, t);
+    osc.frequency.exponentialRampToValueAtTime(surface === "wet" ? 54 : 32, t + 1.2);
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.018, t + 0.12);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 1.45);
+    osc.connect(gain);
+    gain.connect(this.master);
+    osc.start(t);
+    osc.stop(t + 1.5);
+    if (this.airGain) {
+      this.airGain.gain.setTargetAtTime(surface === "wet" ? 0.028 : 0.016, t, 0.08);
+      this.airGain.gain.setTargetAtTime(this.humidity ? 0.02 : 0.012, t + 1.2, 0.4);
+    }
+  }
+
   enterLand(surface: "carpet" | "wet" | "concrete" = "carpet"): void {
     this.footstep(false, surface);
     if (!this.ctx || !this.master) return;
