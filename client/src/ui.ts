@@ -102,11 +102,20 @@ export class Ui {
     el<HTMLElement>("sanity-val").textContent = `${Math.round(snap.sanity)}`;
     el<HTMLElement>("bat-bar").style.width = `${snap.battery}%`;
     el<HTMLElement>("bat-val").textContent = `${Math.round(snap.battery)}`;
-    el<HTMLElement>("depth-pill").textContent = `DEPTH ${snap.depth}`;
+    el<HTMLElement>("depth-pill").textContent = snap.depthLabel;
+    el<HTMLElement>("vibe-pill").textContent = snap.vibe;
     const key = el<HTMLElement>("key-pill");
-    key.textContent = snap.hasKeycard ? "KEYCARD" : "NO CARD";
+    key.textContent = snap.hasKeycard ? "钥匙卡 KEYCARD" : "无卡 NO CARD";
     key.classList.toggle("dim", !snap.hasKeycard);
     el<HTMLElement>("status-line").textContent = snap.status;
+    const hint = el<HTMLElement>("open-hint");
+    if (snap.hint) {
+      hint.textContent = snap.hint;
+      hint.classList.remove("hidden");
+      hint.classList.add("is-on");
+    } else {
+      hint.classList.remove("is-on");
+    }
     el<HTMLElement>("jev-line").textContent =
       `${snap.source} · ${Math.round(snap.latencyMs)}ms · ${snap.jevCalls}/${snap.fallbackCalls}`;
     const warn = el<HTMLElement>("warn-line");

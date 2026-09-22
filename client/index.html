@@ -20,6 +20,7 @@
       <div id="vignette" aria-hidden="true"></div>
       <div id="grade" aria-hidden="true"></div>
       <div id="static-overlay" aria-hidden="true"></div>
+      <div id="door-pass" aria-hidden="true"></div>
       <div id="hurt" aria-hidden="true"></div>
       <div id="crosshair" aria-hidden="true"></div>
       <div id="pickup-toast" class="hidden" role="status"></div>
@@ -56,21 +57,23 @@
         <div class="hud-top">
           <div class="frame meters">
             <div class="meter">
-              <span>SANITY</span>
+              <span>神智 SANITY</span>
               <div class="bar"><i id="sanity-bar"></i></div>
               <b id="sanity-val">100</b>
             </div>
             <div class="meter">
-              <span>LAMP</span>
+              <span>手电 LAMP</span>
               <div class="bar lamp"><i id="bat-bar"></i></div>
               <b id="bat-val">100</b>
             </div>
           </div>
           <div class="pills">
-            <span id="depth-pill" class="frame chip">DEPTH 0</span>
-            <span id="key-pill" class="frame chip dim">NO CARD</span>
+            <span id="depth-pill" class="frame chip">深度 DEPTH 1</span>
+            <span id="vibe-pill" class="frame chip vibe">空置办公室 · empty_office</span>
+            <span id="key-pill" class="frame chip dim">无卡 NO CARD</span>
           </div>
         </div>
+        <p id="open-hint">往前走。找一扇门。</p>
         <p id="status-line">The hum does not come from the ceiling.</p>
         <div class="hud-bottom">
           <span id="jev-line" class="quiet">Jev —</span>

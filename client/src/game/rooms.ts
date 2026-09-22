@@ -48,6 +48,8 @@ export type Door = {
   decision: RoomDecision | null;
   shimmer: THREE.Mesh;
   glitch: THREE.Mesh;
+  veil: THREE.Mesh;
+  frames: THREE.Mesh[];
 };
 
 export type RoomLight = {
@@ -78,6 +80,8 @@ export type BuiltRoom = {
   entryWall: Wall;
   powerFlicker: number;
   surface: "carpet" | "wet" | "concrete";
+  guideLight: THREE.PointLight | null;
+  guideBase: number;
 };
 
 const DOOR_W = 1.45;
@@ -242,10 +246,11 @@ function makeDoorVisuals(
   wall: Wall,
   pos: { x: number; z: number },
   kind: "real" | "fake" | "false_exit" | "locked" | "exit",
-): { shimmer: THREE.Mesh; glitch: THREE.Mesh } {
-  addBox(
+): { shimmer: THREE.Mesh; glitch: THREE.Mesh; veil: THREE.Mesh; frames: THREE.Mesh[] } {
+  const frameMat = mats.frame.clone();
+  const left = addBox(
     group,
-    mats.frame,
+    frameMat,
     wall === "e" || wall === "w" ? pos.x : pos.x - (DOOR_W / 2 + 0.06),
     DOOR_H / 2,
     wall === "n" || wall === "s" ? pos.z : pos.z - (DOOR_W / 2 + 0.06),
@@ -253,9 +258,9 @@ function makeDoorVisuals(
     DOOR_H,
     wall === "n" || wall === "s" ? 0.22 : 0.1,
   );
-  addBox(
+  const right = addBox(
     group,
-    mats.frame,
+    frameMat,
     wall === "e" || wall === "w" ? pos.x : pos.x + (DOOR_W / 2 + 0.06),
     DOOR_H / 2,
     wall === "n" || wall === "s" ? pos.z : pos.z + (DOOR_W / 2 + 0.06),
@@ -263,6 +268,7 @@ function makeDoorVisuals(
     DOOR_H,
     wall === "n" || wall === "s" ? 0.22 : 0.1,
   );
+  const frames = [left, right];
 
   const yaw = wall === "e" ? -Math.PI / 2 : wall === "w" ? Math.PI / 2 : wall === "s" ? Math.PI : 0;
   const shimmerMat = new THREE.MeshBasicMaterial({
@@ -292,6 +298,19 @@ function makeDoorVisuals(
   glitch.visible = false;
   group.add(glitch);
 
+  const veilMat = new THREE.MeshBasicMaterial({
+    color: 0x1c1408,
+    transparent: true,
+    opacity: kind === "real" ? 0.11 : 0,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const veil = new THREE.Mesh(new THREE.PlaneGeometry(DOOR_W * 0.9, DOOR_H * 0.9), veilMat);
+  veil.position.set(pos.x, DOOR_H / 2, pos.z);
+  veil.rotation.y = yaw;
+  veil.visible = kind === "real";
+  group.add(veil);
+
   if (kind === "fake" || kind === "false_exit") {
     const seal = new THREE.Mesh(
       new THREE.PlaneGeometry(DOOR_W * 0.96, DOOR_H * 0.96),
@@ -316,7 +335,7 @@ function makeDoorVisuals(
       else bar.position.z += i * 0.22;
     }
   }
-  return { shimmer, glitch };
+  return { shimmer, glitch, veil, frames };
 }
 
 function addLight(
@@ -635,6 +654,8 @@ export function buildRoom(options: {
         decision: null,
         shimmer: visuals.shimmer,
         glitch: visuals.glitch,
+        veil: visuals.veil,
+        frames: visuals.frames,
       });
     }
   }
@@ -655,6 +676,18 @@ export function buildRoom(options: {
     addLight(group, lights, -w * 0.22, -d * 0.2, 16 * Math.max(dimMul, 0.05), decision);
     addLight(group, lights, w * 0.2, d * 0.18, 15 * Math.max(dimMul, 0.05), decision);
     if (w > 10) addLight(group, lights, 0, 0, 13 * Math.max(dimMul, 0.05), decision);
+  }
+
+  let guideLight: THREE.PointLight | null = null;
+  let guideBase = 0;
+  if (id === "start") {
+    // Stronger warm pool toward the south door the wanderer already faces.
+    const gz = -d / 2 + 2.35;
+    addLight(group, lights, 0, gz, 22 * Math.max(dimMul, 0.05), decision);
+    guideLight = new THREE.PointLight(0xffe08a, 6.4, 7.2, 1.85);
+    guideLight.position.set(0, 1.55, gz);
+    group.add(guideLight);
+    guideBase = 6.4;
   }
 
   const rng = mulberry32(hashString(id));
@@ -688,6 +721,8 @@ export function buildRoom(options: {
     entryWall: entryLocal,
     powerFlicker: decision.encounterCard === "power_flicker_event" ? 1.7 : 0,
     surface: archetype === "stairwell" ? "concrete" : wet ? "wet" : "carpet",
+    guideLight,
+    guideBase,
   };
 }
 

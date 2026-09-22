@@ -10,7 +10,15 @@ import {
 } from "@liminal/shared";
 import { requestRoom } from "../api.ts";
 import { connectedDoorShouldEnter, doorAwaitingDecision, doorNeedsForcedFallback } from "./doors.ts";
-import { DOOR_SHIMMER_NEAR, doorGlitchOpacity, doorShimmerOpacity, tubeFlickerMul } from "./lighting.ts";
+import {
+  DOOR_SHIMMER_NEAR,
+  doorFrameHex,
+  doorGlitchOpacity,
+  doorShimmerOpacity,
+  doorVeilOpacity,
+  startGuideMul,
+  tubeFlickerMul,
+} from "./lighting.ts";
 import {
   aabbsOverlap,
   dist2,
@@ -256,6 +264,22 @@ export class World {
           (door.glitch.material as THREE.MeshBasicMaterial).opacity = doorGlitchOpacity(time);
           door.glitch.position.y = 1.07 + Math.sin(time * 1.9) * 0.012;
         }
+        const markable = !door.fake && !door.isFalseExit && !door.isExit && !door.locked;
+        const veilOpacity = markable ? doorVeilOpacity(connected) : 0;
+        if (door.veil.visible !== veilOpacity > 0) door.veil.visible = veilOpacity > 0;
+        (door.veil.material as THREE.MeshBasicMaterial).opacity = veilOpacity;
+        if (markable) {
+          const hex = doorFrameHex(connected);
+          for (const frame of door.frames) {
+            const mat = frame.material as THREE.MeshStandardMaterial;
+            if (mat.color.getHex() !== hex) mat.color.setHex(hex);
+          }
+        }
+      }
+      if (room.guideLight) {
+        const stillOpen = room.doors.some((door) => !door.connectedRoomId && !door.fake && !door.isFalseExit);
+        room.guideLight.visible = here && stillOpen;
+        room.guideLight.intensity = stillOpen ? room.guideBase * startGuideMul(time) : 0;
       }
     }
   }

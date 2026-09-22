@@ -32,3 +32,35 @@ export function doorShimmerOpacity(kind: "pending" | "ready", time: number): num
 export function doorGlitchOpacity(time: number): number {
   return 0.02 + Math.abs(Math.sin(time * 1.8 + 1.2)) * 0.03;
 }
+
+/** Door-pass overlay: dark → clear, quadratic ease, never a bright flash. */
+export function enterFadeOpacity(enterFade: number): number {
+  const t = Math.min(1, Math.max(0, enterFade));
+  return t * t * 0.58;
+}
+
+/** Exposure dip while crossing a jamb. Positive value is subtracted. */
+export function enterExposureDip(enterFade: number): number {
+  const t = Math.min(1, Math.max(0, enterFade));
+  return t * t * 0.13;
+}
+
+/** Extra vignette while the jamb silhouette is up. */
+export function enterVignetteAdd(enterFade: number): number {
+  const t = Math.min(1, Math.max(0, enterFade));
+  return t * t * 0.22;
+}
+
+/** Static veil: unexplored throats read slightly occupied; explored stay open. */
+export function doorVeilOpacity(explored: boolean): number {
+  return explored ? 0 : 0.11;
+}
+
+export function doorFrameHex(explored: boolean): number {
+  return explored ? 0x2c2618 : 0x6a4e1a;
+}
+
+/** Start-room wayfinding lamp — slow breathe, not a flicker. */
+export function startGuideMul(time: number): number {
+  return 1 + Math.sin(time * 0.72) * 0.055;
+}

@@ -172,6 +172,40 @@ export class AudioEngine {
     osc.stop(t + 0.34);
   }
 
+  enterLand(surface: "carpet" | "wet" | "concrete" = "carpet"): void {
+    this.footstep(false, surface);
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(surface === "concrete" ? 78 : 62, t);
+    osc.frequency.exponentialRampToValueAtTime(38, t + 0.14);
+    gain.gain.setValueAtTime(0.06, t);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+    osc.connect(gain);
+    gain.connect(this.master);
+    osc.start();
+    osc.stop(t + 0.18);
+  }
+
+  hintAhead(): void {
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(196, t);
+    osc.frequency.exponentialRampToValueAtTime(148, t + 0.55);
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.028, t + 0.06);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.62);
+    osc.connect(gain);
+    gain.connect(this.master);
+    osc.start();
+    osc.stop(t + 0.64);
+  }
+
   bait(): void {
     this.footstep(true, "wet");
     this.click("drip");
