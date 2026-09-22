@@ -22,7 +22,7 @@ import {
 import {
   aabbsOverlap,
   dist2,
-  pointInAabb,
+  pickContainedRoom,
   type Aabb,
 } from "./math.ts";
 import {
@@ -80,10 +80,7 @@ export class World {
   }
 
   roomAt(x: number, z: number): BuiltRoom | null {
-    for (const room of this.rooms.values()) {
-      if (pointInAabb(x, z, room.bounds, -0.15)) return room;
-    }
-    return null;
+    return pickContainedRoom(this.rooms.values(), this.currentId, x, z);
   }
 
   collidersNear(x: number, z: number): Aabb[] {

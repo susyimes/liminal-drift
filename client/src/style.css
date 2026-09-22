@@ -362,7 +362,8 @@ kbd,
   opacity: 0.5;
 }
 
-.pills .vibe {
+#hud .pills .vibe,
+#vibe-pill {
   font-family: "Noto Serif SC", var(--display);
   letter-spacing: 0.06em;
   font-size: 12px;

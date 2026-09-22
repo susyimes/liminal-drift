@@ -66,6 +66,26 @@ export function pointInAabb(x: number, z: number, box: Aabb, pad = 0): boolean {
   return x >= box.minX - pad && x <= box.maxX + pad && z >= box.minZ - pad && z <= box.maxZ + pad;
 }
 
+/**
+ * Doorway bounds overlap. Prefer the room we are already in so standing in a
+ * jamb does not flip currentId / HUD vibe / enter-fade back to the previous room.
+ */
+export function pickContainedRoom<T extends { id: string; bounds: Aabb }>(
+  rooms: Iterable<T>,
+  currentId: string,
+  x: number,
+  z: number,
+  pad = -0.15,
+): T | null {
+  let fallback: T | null = null;
+  for (const room of rooms) {
+    if (!pointInAabb(x, z, room.bounds, pad)) continue;
+    if (room.id === currentId) return room;
+    fallback ??= room;
+  }
+  return fallback;
+}
+
 export function circleHitsAabb(x: number, z: number, radius: number, box: Aabb): boolean {
   const qx = Math.min(Math.max(x, box.minX), box.maxX);
   const qz = Math.min(Math.max(z, box.minZ), box.maxZ);
