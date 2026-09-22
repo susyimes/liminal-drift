@@ -301,15 +301,17 @@ export function fallbackRoomDecision(state: CompactGameState, portalId: string):
   );
 
   const recent = new Set(state.recentArchetypes.slice(-2));
-  const exitWeight =
-    state.depth >= WIN_DEPTH
+  const justSawExit = state.recentArchetypes[state.recentArchetypes.length - 1] === "exit_foyer";
+  const exitWeight = justSawExit
+    ? 0
+    : state.depth >= WIN_DEPTH
       ? 12
       : progress.exitChance >= 0.6 && state.depth >= 7
         ? 1.8 + progress.exitChance * 4
         : state.depth >= 10
-          ? 2.2
+          ? 1.1
           : state.depth >= 8
-            ? 0.7
+            ? 0.35
             : 0;
 
   const visited = state.recentArchetypes.filter(
@@ -330,7 +332,7 @@ export function fallbackRoomDecision(state: CompactGameState, portalId: string):
         { value: "flooded_lobby", w: recent.has("flooded_lobby") ? 0.3 : 1.0 },
         { value: "maze_cubicles", w: recent.has("maze_cubicles") ? 0.35 : 1.6 },
         { value: "stairwell", w: recent.has("stairwell") ? 0.25 : 0.95 },
-        { value: "poolcore", w: recent.has("poolcore") ? 0.35 : 1.35 },
+        { value: "poolcore", w: recent.has("poolcore") ? 0.45 : 2.0 },
         { value: "hotel_hall", w: recent.has("hotel_hall") ? 0.35 : 1.15 },
         { value: "parking_ramp", w: recent.has("parking_ramp") ? 0.3 : 0.95 },
         { value: "machine_room", w: recent.has("machine_room") ? 0.28 : 0.85 },
