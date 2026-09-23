@@ -1177,3 +1177,76 @@ export function startRoomDecision(): RoomDecision {
     tunnelMood: "yellow_throat",
   };
 }
+
+/** Playtest dest: book DEPTH without buildRoom / GPU work on the instrumented await. */
+export function buildLiteRoom(options: {
+  id: string;
+  decision: RoomDecision;
+  cx: number;
+  cz: number;
+  entryWorldWall: Wall;
+}): BuiltRoom {
+  const ghost = (): THREE.Mesh =>
+    new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ visible: false }));
+  const entry: Door = {
+    id: `${options.id}-entry`,
+    wall: "s",
+    worldWall: options.entryWorldWall,
+    localX: 0,
+    localZ: 2,
+    width: 1.45,
+    isExit: false,
+    isFalseExit: false,
+    fake: false,
+    locked: false,
+    baitVisible: false,
+    saferDim: false,
+    low: false,
+    connectedRoomId: null,
+    generation: "ready",
+    pendingSince: 0,
+    decision: null,
+    shimmer: ghost(),
+    glitch: ghost(),
+    veil: ghost(),
+    frames: [],
+  };
+  const open: Door = {
+    ...entry,
+    id: `${options.id}-open`,
+    wall: "n",
+    worldWall: opposite(options.entryWorldWall),
+    localZ: -2,
+    generation: "idle",
+    shimmer: ghost(),
+    glitch: ghost(),
+    veil: ghost(),
+    frames: [],
+  };
+  const bounds = aabbFromCenter(options.cx, 1.4, options.cz, 3, 1.4, 3);
+  return {
+    id: options.id,
+    archetype: options.decision.roomArchetype,
+    decision: options.decision,
+    group: new THREE.Group(),
+    colliders: [bounds],
+    bounds,
+    doors: [entry, open],
+    pickups: [],
+    lights: [],
+    water: false,
+    darkPatch: null,
+    alcove: null,
+    cx: options.cx,
+    cz: options.cz,
+    yaw: 0,
+    width: 6,
+    depth: 6,
+    entryWall: "s",
+    powerFlicker: 0,
+    surface: "carpet",
+    guideLight: null,
+    guideBase: 0,
+    puddles: [],
+  };
+}

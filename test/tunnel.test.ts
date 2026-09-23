@@ -26,6 +26,7 @@ import {
   bookedWalkMs,
   destLockedForWalk,
   inBandWalkTargetMs,
+  instrumentedAwaitMs,
   stepAwaitBudgetMs,
   tunnelClockPhase,
   tunnelWaitMs,
@@ -161,6 +162,18 @@ test("throat walk never books a sub-800 cut as a walk", () => {
     assert.ok(target >= 800 && target <= 1400, `${dest} ${target}`);
     assert.equal(walkRemainMs(target, target), 0);
   }
+});
+
+test("instrumented await duration is exactly wait+walk (supervisor wall)", () => {
+  assert.equal(instrumentedAwaitMs(1800, 1372), 1800 + 1372);
+  assert.equal(instrumentedAwaitMs(1800, 1126), 1800 + 1126);
+  assert.equal(instrumentedAwaitMs(0, 1152), 1152);
+  assert.equal(instrumentedAwaitMs(0, 912), 912);
+  assert.ok(wallBooksAligned(instrumentedAwaitMs(1800, 1372), 1800, 1372));
+  assert.ok(wallBooksAligned(instrumentedAwaitMs(0, 1152), 0, 1152));
+  assert.equal(wallBooksAligned(4061, 1800, 1372), false);
+  assert.equal(wallBooksAligned(12865, 0, 912), false);
+  assert.ok(instrumentedAwaitMs(0, 912) + STEP_WALL_SLOP_MS < 1200);
 });
 
 test("step await wall is wait+walk only (±150), not prefetch/hold/settle", () => {

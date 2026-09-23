@@ -136,6 +136,17 @@ export function stepAwaitBudgetMs(waitMs: number, walkMs = TUNNEL_WALK_MS_MAX): 
   return Math.max(0, waitMs) + walk + STEP_WALL_SLOP_MS;
 }
 
+/** The playtest await itself is exactly Wait + Walk — no prefetch/spawn/render slop. */
+export function instrumentedAwaitMs(waitMs: number, walkMs: number): number {
+  return Math.max(0, waitMs) + Math.max(TUNNEL_WALK_MS_MIN, Math.min(TUNNEL_WALK_MS_MAX, walkMs));
+}
+
+export function sleepMs(ms: number): Promise<void> {
+  const n = Math.max(0, ms);
+  if (n <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, n));
+}
+
 export function wallBooksAligned(
   wallMs: number,
   waitMs: number,
