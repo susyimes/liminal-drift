@@ -18,7 +18,9 @@ import {
 } from "../client/src/game/transit.ts";
 import {
   TUNNEL_WALK_MS,
+  beginArmedWait,
   tunnelClockPhase,
+  tunnelWaitMs,
   tunnelWalkDurationMs,
   tunnelWalkEase,
   tunnelWalkKind,
@@ -79,6 +81,19 @@ test("walk-only clock is 800–1400ms and ignores hold + generation wait", () =>
   const crossingMs = holdMs + waitMs + walkMs + 1350;
   assert.ok(crossingMs > 1400, "full crossing including Jev wait is not the walk");
   assert.ok(walkMsInBand(walkMs));
+});
+
+test("armGenerationHold wait is booked from throat Wait, not from the arm() call", () => {
+  const armCall = 10_000;
+  const throatEnter = armCall + 1600;
+  const fromCall = beginArmedWait(armCall, 1800);
+  assert.ok(fromCall.holdUntil - throatEnter < 300, "deadline from arm() is almost gone at enter");
+  const fromWait = beginArmedWait(throatEnter, 1800);
+  const waitMs = tunnelWaitMs(fromWait.waitStartedAt, fromWait.holdUntil);
+  assert.equal(waitMs, 1800);
+  assert.ok(Math.abs(waitMs - 1800) <= 100);
+  assert.equal(tunnelWaitMs(0, fromWait.holdUntil), 0);
+  assert.ok(walkMsInBand(tunnelWalkDurationMs("hotel_hall")));
 });
 
 test("EaseInOut is on time, so a late destination does not stretch the walk", () => {

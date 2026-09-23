@@ -68,3 +68,20 @@ export function tunnelWalkProgress(startProgress: number, u: number, exitProgres
 export function walkMsInBand(walkMs: number): boolean {
   return walkMs >= TUNNEL_WALK_MS_MIN && walkMs <= TUNNEL_WALK_MS_MAX;
 }
+
+/**
+ * `armGenerationHold(ms)` is a duration for the *next* Wait phase.
+ * Start the clock when the throat wait begins, not when arm() is called —
+ * otherwise stepUnexploredDoor's prefetch loop can burn the deadline and
+ * lastTunnelReport().waitMs stays 0.
+ */
+export function beginArmedWait(now: number, pendingMs: number): { holdUntil: number; waitStartedAt: number } {
+  const ms = Math.max(0, pendingMs);
+  if (ms <= 0) return { holdUntil: 0, waitStartedAt: 0 };
+  return { holdUntil: now + ms, waitStartedAt: now };
+}
+
+export function tunnelWaitMs(waitStartedAt: number, walkStartedAt: number): number {
+  if (waitStartedAt <= 0 || walkStartedAt <= 0) return 0;
+  return Math.round(Math.max(0, walkStartedAt - waitStartedAt));
+}
