@@ -33,6 +33,26 @@ export function doorNeedsForcedFallback(door: {
 }
 
 /**
+ * Pending / generating doors must not be physical walls. The player
+ * enters a jamb hold / wait state instead of standing outside for the
+ * Jev timeout (that wait used to bleed into measured walk duration).
+ */
+export function doorShouldBlock(
+  door: {
+    isExit?: boolean;
+    fake?: boolean;
+    isFalseExit?: boolean;
+    locked?: boolean;
+    connectedRoomId?: string | null;
+  },
+  inThisTransit: boolean,
+): boolean {
+  if (inThisTransit) return false;
+  if (door.connectedRoomId) return false;
+  return Boolean(door.isExit || door.fake || door.isFalseExit || door.locked);
+}
+
+/**
  * Already-linked doorway: only change rooms when the player actually
  * crosses through. Standing just inside a newly spawned room must not
  * re-fire "entered" every frame (that strobed lights + enter fade).

@@ -40,7 +40,7 @@ if (Number.isFinite(playtestCount) && playtestCount > 0) {
     const log: unknown[] = [];
     for (let i = 0; i < playtestCount; i += 1) {
       const step = await game.stepUnexploredDoor();
-      log.push(step);
+      log.push({ ...step, tunnel: game.lastTunnelReport() });
       if (step.kind !== "entered") break;
     }
     (window as Window & { __liminalPlaytest?: unknown }).__liminalPlaytest = log;

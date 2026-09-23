@@ -9,12 +9,23 @@ import {
 } from "../client/src/game/lighting.ts";
 import {
   inferTunnelMood,
+  pointAlongTunnel,
   tunnelMeters,
   tunnelProgress,
   tunnelReachedExit,
   tunnelWalkSeconds,
   tunnelWalkYaw,
 } from "../client/src/game/transit.ts";
+import {
+  TUNNEL_WALK_MS,
+  tunnelClockPhase,
+  tunnelWalkDurationMs,
+  tunnelWalkEase,
+  tunnelWalkKind,
+  tunnelWalkProgress,
+  tunnelWalkU,
+  walkMsInBand,
+} from "../client/src/game/tunnelClock.ts";
 
 test("tunnel lengths stay a 0.8–1.4s walk, not a cutscene", () => {
   assert.ok(tunnelMeters("short") >= 3.6 && tunnelMeters("short") < 4.6);
@@ -45,6 +56,53 @@ test("poolcore destinations infer a wet throat", () => {
 test("walking forward down a southward throat matches WASD yaw", () => {
   const yaw = tunnelWalkYaw({ x: 0, z: -1 });
   assert.ok(Math.abs(yaw) < 1e-9);
+});
+
+test("walk-only clock is 800–1400ms and ignores hold + generation wait", () => {
+  assert.equal(tunnelClockPhase(0.4, false), "hold");
+  assert.equal(tunnelClockPhase(0, false), "wait");
+  assert.equal(tunnelClockPhase(0, true), "walk");
+  assert.equal(tunnelWalkKind("empty_office", "long"), "short");
+  assert.equal(tunnelWalkKind("hotel_hall"), "short");
+  assert.equal(tunnelWalkKind("maze_cubicles"), "short");
+  assert.equal(tunnelWalkKind("poolcore", "short"), "long");
+  assert.equal(tunnelWalkDurationMs("empty_office"), TUNNEL_WALK_MS.short);
+  assert.equal(tunnelWalkDurationMs("poolcore"), TUNNEL_WALK_MS.long);
+  assert.ok(TUNNEL_WALK_MS.short >= 800 && TUNNEL_WALK_MS.short <= 1000);
+  assert.ok(TUNNEL_WALK_MS.long >= 1200 && TUNNEL_WALK_MS.long <= 1400);
+  for (const dest of ["empty_office", "hotel_hall", "maze_cubicles", "poolcore", "stairwell"] as const) {
+    assert.ok(walkMsInBand(tunnelWalkDurationMs(dest)), `${dest} ${tunnelWalkDurationMs(dest)}`);
+  }
+  const holdMs = 500;
+  const waitMs = 2000;
+  const walkMs = tunnelWalkDurationMs("empty_office");
+  const crossingMs = holdMs + waitMs + walkMs + 1350;
+  assert.ok(crossingMs > 1400, "full crossing including Jev wait is not the walk");
+  assert.ok(walkMsInBand(walkMs));
+});
+
+test("EaseInOut is on time, so a late destination does not stretch the walk", () => {
+  assert.equal(tunnelWalkEase(0), 0);
+  assert.equal(tunnelWalkEase(1), 1);
+  assert.ok(Math.abs(tunnelWalkEase(0.5) - 0.5) < 1e-9);
+  const duration = tunnelWalkDurationMs("poolcore");
+  let landedAt = 0;
+  for (let t = 0; t <= duration + 50; t += 1000 / 60) {
+    if (tunnelWalkU(t, duration) >= 1) {
+      landedAt = t;
+      break;
+    }
+  }
+  assert.ok(walkMsInBand(landedAt), `landedAt ${landedAt}`);
+  assert.ok(landedAt >= duration);
+  assert.ok(landedAt - duration < 20);
+  const startP = 0.16;
+  const mid = tunnelWalkProgress(startP, 0.5);
+  const end = tunnelWalkProgress(startP, 1);
+  assert.ok(mid > startP && mid < end);
+  const tunnel = { entry: { x: 0, z: 0 }, exit: { x: 0, z: -10 } };
+  const point = pointAlongTunnel(tunnel, 0.5);
+  assert.ok(Math.abs(point.z + 5) < 1e-9);
 });
 
 test("tunnel tubes stay in a calm band", () => {

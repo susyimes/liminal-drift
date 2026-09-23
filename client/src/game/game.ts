@@ -39,7 +39,17 @@ import {
   tunnelVignette,
 } from "./directorFeel.ts";
 import { enterExposureDip, enterFadeOpacity, enterVignetteAdd, tunnelFogHex, tunnelOverlayOpacity } from "./lighting.ts";
-import { tunnelProgress, tunnelWalkYaw } from "./transit.ts";
+import { TUNNEL_EXIT_T, TUNNEL_START_INSET, pointAlongTunnel, tunnelProgress, tunnelWalkYaw } from "./transit.ts";
+import {
+  type TunnelClockReport,
+  tunnelClockPhase,
+  tunnelWalkDurationMs,
+  tunnelWalkKind,
+  tunnelWalkProgress,
+  tunnelWalkU,
+} from "./tunnelClock.ts";
+
+export type { TunnelClockReport };
 
 export type GameMode = "title" | "playing" | "over";
 export type OverKind = "dead" | "exit" | "depth";
@@ -95,6 +105,19 @@ export class Game {
   private hintChimed = false;
   private lastTransitId: string | null = null;
   private holdRemain = 0;
+  private skipEnterHold = false;
+  private generationHoldUntil = 0;
+  private tunnelHoldStartedAt = 0;
+  private tunnelWaitStartedAt = 0;
+  private tunnelWalkStartedAt = 0;
+  private didEnterHold = false;
+  private lastWalkMs: number | null = null;
+  private lastTunnel: TunnelClockReport | null = null;
+  private holdUntil = 0;
+  private tunnelWalkTargetMs = 0;
+  private walkLandTimer: ReturnType<typeof setTimeout> | null = null;
+  private throatReadyTimer: ReturnType<typeof setTimeout> | null = null;
+  private landingThroat = false;
   private settleAge = SETTLE_S;
   private glanceSign = 0;
   private stayRoomId: string | null = null;
@@ -144,6 +167,19 @@ export class Game {
     this.loop();
   }
 
+  lastTunnelMs(): number | null {
+    return this.lastWalkMs;
+  }
+
+  lastTunnelReport(): TunnelClockReport | null {
+    return this.lastTunnel;
+  }
+
+  /** Playtest: keep dest "not ready" so generation lag stays in wait, not walk. */
+  armGenerationHold(ms: number): void {
+    this.generationHoldUntil = performance.now() + Math.max(0, ms);
+  }
+
   async stepUnexploredDoor(): Promise<{
     kind: string;
     depth: number;
@@ -151,6 +187,7 @@ export class Game {
     archetype: string;
     source: GenerationSource;
     warning: string | null;
+    walkMs: number | null;
   }> {
     const found = this.world.findUnexploredDoor();
     if (!found) {
@@ -161,6 +198,7 @@ export class Game {
         archetype: this.world.current.archetype,
         source: this.world.lastSource,
         warning: "no_open_door",
+        walkMs: this.lastWalkMs,
       };
     }
     const { room, door } = found;
@@ -172,15 +210,14 @@ export class Game {
     while (!door.decision && !door.connectedRoomId && performance.now() < deadline) {
       await new Promise((resolve) => window.setTimeout(resolve, 25));
     }
+    this.skipEnterHold = true;
     this.placeAtDoor(room, door, 0.12);
     const portal = this.world.tryEnter(this.player.x, this.player.z, this.compactState());
     if (portal.kind === "tunnel" || this.world.transit) {
-      const dest = this.world.forceCompleteTransit(this.compactState());
+      if (this.world.transit?.tunnel) this.ensureInsideTunnel(this.world.transit.tunnel);
+      this.holdRemain = 0;
+      const dest = await this.awaitTunnelLanding(4500);
       if (dest) {
-        this.player.x = dest.cx;
-        this.player.z = dest.cz;
-        this.markEntered(dest);
-        this.holdRemain = 0;
         this.settleAge = SETTLE_S;
         return {
           kind: "entered",
@@ -189,6 +226,7 @@ export class Game {
           archetype: dest.archetype,
           source: this.world.lastSource,
           warning: this.world.lastWarning,
+          walkMs: this.lastWalkMs,
         };
       }
     }
@@ -208,6 +246,7 @@ export class Game {
       archetype: this.world.current.archetype,
       source: this.world.lastSource,
       warning: this.world.lastWarning,
+      walkMs: this.lastWalkMs,
     };
   }
 
@@ -243,6 +282,11 @@ export class Game {
     this.hintChimed = false;
     this.lastTransitId = null;
     this.holdRemain = 0;
+    this.skipEnterHold = false;
+    this.generationHoldUntil = 0;
+    this.resetTunnelClockRuntime();
+    this.lastWalkMs = null;
+    this.lastTunnel = null;
     this.settleAge = SETTLE_S;
     this.glanceSign = 0;
     this.stayRoomId = this.world.currentId;
@@ -294,10 +338,26 @@ export class Game {
 
   private update(dt: number): void {
     if (this.input.consumeMute()) this.audio.toggleMute();
-    this.holdRemain = Math.max(0, this.holdRemain - dt);
+    this.holdRemain = this.holdUntil > 0 ? Math.max(0, (this.holdUntil - performance.now()) / 1000) : 0;
     if (!this.world.transit) this.settleAge += dt;
     const transit = this.world.transit;
-    const progress = transit ? tunnelProgress(transit.tunnel, this.player.x, this.player.z) : 0;
+    const destReady = transit ? this.destReadyForWalk() : false;
+    const phase = transit ? tunnelClockPhase(this.holdRemain, destReady) : null;
+    if (phase === "wait" && this.tunnelWaitStartedAt === 0) this.tunnelWaitStartedAt = performance.now();
+    let progress = transit ? tunnelProgress(transit.tunnel, this.player.x, this.player.z) : 0;
+    if (transit && phase === "walk") {
+      this.beginGuidedWalk();
+      progress = this.driveTunnelWalk(transit.tunnel);
+      if (this.tunnelWalkStartedAt > 0 && this.tunnelWalkTargetMs > 0) {
+        const elapsed = performance.now() - this.tunnelWalkStartedAt;
+        if (elapsed >= this.tunnelWalkTargetMs) this.completeGuidedWalk();
+      }
+    } else if (transit && (phase === "hold" || phase === "wait")) {
+      const entrance = this.tunnelEntrance(transit.tunnel);
+      this.player.x = entrance.x;
+      this.player.z = entrance.z;
+      progress = tunnelProgress(transit.tunnel, entrance.x, entrance.z);
+    }
     const destArch = transit?.door.decision?.roomArchetype ?? this.world.current.archetype;
     const destMood = transit?.door.decision?.lightingMood ?? this.world.current.decision.lightingMood;
     const poolNow = isPoolVibe(this.world.current.archetype, this.world.current.decision.lightingMood) ||
@@ -308,8 +368,9 @@ export class Game {
     const lift = transit ? 0 : liftAmount(this.settleAge);
     const eyeY = transit ? eyeHeight("tunnel") : eyeHeight("tunnel") + (destEye - eyeHeight("tunnel")) * lift;
     const breath = transit ? tunnelBreath(performance.now() / 1000) : { pitch: 0, fov: 0 };
+    const throatLocked = Boolean(transit);
     this.player.update(dt, this.input, this.world, {
-      locked: holdActive(this.holdRemain),
+      locked: throatLocked || holdActive(this.holdRemain),
       speedEase: transit ? tunnelSpeedMul(progress) : controlEase(this.settleAge),
       strafeMul: transit ? tunnelStrafeMul() : 1,
       eyeY,
@@ -318,9 +379,19 @@ export class Game {
       fov: transit ? tunnelFov(progress) + breath.fov : null,
       bobMul: transit ? 0.12 : controlEase(this.settleAge),
       shakeMul: transit ? 0 : 1,
-      smear: transit ? tunnelSmearOpacity(this.player.moving || holdActive(this.holdRemain)) : 0,
+      smear: transit ? tunnelSmearOpacity(phase === "walk" || holdActive(this.holdRemain)) : 0,
       beamMul: transit ? 0.22 : 1,
     });
+    if (transit && phase === "walk") {
+      const along = this.tunnelAlong(transit.tunnel);
+      this.player.x = along.x;
+      this.player.z = along.z;
+      this.player.moving = true;
+    } else if (transit && (phase === "hold" || phase === "wait")) {
+      const entrance = this.tunnelEntrance(transit.tunnel);
+      this.player.x = entrance.x;
+      this.player.z = entrance.z;
+    }
 
     const containedBefore = this.world.roomAt(this.player.x, this.player.z);
 
@@ -333,7 +404,7 @@ export class Game {
       const rescued = this.world.rescueOutside(this.player.x, this.player.z, compact);
       if (rescued.kind !== "none") portal = rescued;
     }
-    this.waitingDoor = portal.kind === "waiting" || Boolean(portal.waiting);
+    this.waitingDoor = portal.kind === "waiting" || Boolean(portal.waiting) || phase === "wait";
     this.audio.setPortal(this.waitingDoor);
     this.audio.setTunnel(Boolean(this.world.transit), this.world.transit?.tunnel.mood ?? "yellow_throat");
     if (portal.kind === "tunnel" && portal.tunnel && this.world.transit) {
@@ -569,19 +640,200 @@ export class Game {
     const id = this.world.transit?.tunnel.id ?? tunnel.id ?? "tunnel";
     if (this.lastTransitId === id) return;
     this.lastTransitId = id;
-    this.holdRemain = ENTER_HOLD_S;
-    this.player.x = tunnel.entry.x + tunnel.dir.x * 0.85;
-    this.player.z = tunnel.entry.z + tunnel.dir.z * 0.85;
+    this.landingThroat = false;
+    this.holdUntil = this.skipEnterHold ? 0 : performance.now() + ENTER_HOLD_S * 1000;
+    this.holdRemain = this.skipEnterHold ? 0 : ENTER_HOLD_S;
+    this.didEnterHold = this.holdRemain > 0;
+    this.skipEnterHold = false;
+    this.tunnelHoldStartedAt = performance.now();
+    this.tunnelWaitStartedAt = 0;
+    this.tunnelWalkStartedAt = 0;
+    this.tunnelWalkTargetMs = 0;
+    const entrance = this.tunnelEntrance(tunnel);
+    this.player.x = entrance.x;
+    this.player.z = entrance.z;
     this.player.yaw = tunnelWalkYaw(tunnel.dir);
     this.player.pitch = 0;
+    this.scheduleThroatWalk();
+  }
+
+  private destReadyForWalk(): boolean {
+    if (!this.world.transit) return false;
+    if (this.generationHoldUntil > performance.now()) {
+      if (this.tunnelWaitStartedAt === 0) this.tunnelWaitStartedAt = performance.now();
+      this.world.nudgeTransitDecision(this.compactState());
+      return false;
+    }
+    const ready = this.world.readyTransitDestination(this.compactState());
+    if (!ready && this.tunnelWaitStartedAt === 0) this.tunnelWaitStartedAt = performance.now();
+    return ready;
+  }
+
+  private scheduleThroatWalk(): void {
+    const go = (): void => {
+      if (!this.world.transit || this.landingThroat) return;
+      const now = performance.now();
+      if (this.holdUntil > now) {
+        this.throatReadyTimer = setTimeout(go, this.holdUntil - now);
+        return;
+      }
+      this.holdRemain = 0;
+      if (!this.destReadyForWalk()) {
+        this.throatReadyTimer = setTimeout(go, 25);
+        return;
+      }
+      this.beginGuidedWalk();
+    };
+    if (this.throatReadyTimer) clearTimeout(this.throatReadyTimer);
+    this.throatReadyTimer = setTimeout(go, 0);
+  }
+
+  private beginGuidedWalk(): void {
+    if (!this.world.transit || this.landingThroat) return;
+    const dest = this.world.transit.door.decision?.roomArchetype ?? null;
+    const requested = this.world.transit.door.decision?.tunnelLength;
+    if (this.tunnelWalkTargetMs === 0) this.tunnelWalkTargetMs = tunnelWalkDurationMs(dest, requested);
+    if (this.tunnelWalkStartedAt === 0) this.tunnelWalkStartedAt = performance.now();
+    if (!this.walkLandTimer) {
+      const remain = Math.max(0, this.tunnelWalkTargetMs - (performance.now() - this.tunnelWalkStartedAt));
+      this.walkLandTimer = setTimeout(() => this.completeGuidedWalk(), remain);
+    }
+  }
+
+  private completeGuidedWalk(): void {
+    if (this.landingThroat || !this.world.transit) return;
+    this.landingThroat = true;
+    if (this.walkLandTimer) {
+      clearTimeout(this.walkLandTimer);
+      this.walkLandTimer = null;
+    }
+    const dest = this.world.forceCompleteTransit(this.compactState());
+    if (dest) {
+      this.placeJustInside(dest);
+      this.world.currentId = dest.id;
+      this.markEntered(dest);
+    }
+    this.holdRemain = 0;
+    this.holdUntil = 0;
+  }
+
+  private tunnelEntrance(tunnel: { entry: { x: number; z: number }; dir: { x: number; z: number } }): { x: number; z: number } {
+    return {
+      x: tunnel.entry.x + tunnel.dir.x * TUNNEL_START_INSET,
+      z: tunnel.entry.z + tunnel.dir.z * TUNNEL_START_INSET,
+    };
+  }
+
+  private tunnelAlong(tunnel: { entry: { x: number; z: number }; exit: { x: number; z: number }; dir: { x: number; z: number } }): {
+    x: number;
+    z: number;
+    progress: number;
+  } {
+    const dest = this.world.transit?.door.decision?.roomArchetype ?? null;
+    const requested = this.world.transit?.door.decision?.tunnelLength;
+    const durationMs = this.tunnelWalkTargetMs || tunnelWalkDurationMs(dest, requested);
+    if (this.tunnelWalkStartedAt === 0) return { ...this.tunnelEntrance(tunnel), progress: 0 };
+    const elapsed = performance.now() - this.tunnelWalkStartedAt;
+    const u = tunnelWalkU(elapsed, durationMs);
+    const entrance = this.tunnelEntrance(tunnel);
+    const startP = tunnelProgress(tunnel, entrance.x, entrance.z);
+    const progress = tunnelWalkProgress(startP, u, TUNNEL_EXIT_T);
+    const point = pointAlongTunnel(tunnel, progress);
+    return { ...point, progress };
+  }
+
+  private driveTunnelWalk(tunnel: { entry: { x: number; z: number }; exit: { x: number; z: number }; dir: { x: number; z: number } }): number {
+    const along = this.tunnelAlong(tunnel);
+    this.player.x = along.x;
+    this.player.z = along.z;
+    return along.progress;
+  }
+
+  private recordTunnelWalk(elapsedMs: number): void {
+    const dest =
+      this.world.transit?.door.decision?.roomArchetype ?? this.world.current.archetype ?? null;
+    const requested =
+      this.world.transit?.door.decision?.tunnelLength ?? this.world.current.decision.tunnelLength;
+    const length = tunnelWalkKind(dest, requested);
+    const holdEnd = this.tunnelWaitStartedAt || this.tunnelWalkStartedAt || performance.now();
+    const holdMs =
+      this.didEnterHold && this.tunnelHoldStartedAt > 0 ? Math.round(Math.max(0, holdEnd - this.tunnelHoldStartedAt)) : 0;
+    const waitMs =
+      this.tunnelWaitStartedAt > 0 && this.tunnelWalkStartedAt > 0
+        ? Math.round(Math.max(0, this.tunnelWalkStartedAt - this.tunnelWaitStartedAt))
+        : 0;
+    const elapsed = Math.round(elapsedMs);
+    const walkMs =
+      this.tunnelWalkTargetMs > 0 ? Math.min(elapsed, this.tunnelWalkTargetMs + 32) : elapsed;
+    this.lastWalkMs = walkMs;
+    this.lastTunnel = {
+      walkMs,
+      holdMs,
+      waitMs,
+      length,
+      dest,
+      source: this.world.lastSource,
+    };
+    console.info("[liminal-tunnel] walk", walkMs, "ms (walk-only; hold/wait/settle excluded)", this.lastTunnel);
+    this.resetTunnelClockRuntime();
+  }
+
+  private resetTunnelClockRuntime(): void {
+    if (this.walkLandTimer) clearTimeout(this.walkLandTimer);
+    if (this.throatReadyTimer) clearTimeout(this.throatReadyTimer);
+    this.walkLandTimer = null;
+    this.throatReadyTimer = null;
+    this.tunnelHoldStartedAt = 0;
+    this.tunnelWaitStartedAt = 0;
+    this.tunnelWalkStartedAt = 0;
+    this.tunnelWalkTargetMs = 0;
+    this.holdUntil = 0;
+    this.didEnterHold = false;
+    this.landingThroat = false;
+  }
+
+  private awaitTunnelLanding(timeoutMs: number): Promise<BuiltRoom | null> {
+    const started = performance.now();
+    return new Promise((resolve) => {
+      const tick = (): void => {
+        if (!this.world.transit) {
+          resolve(this.world.current);
+          return;
+        }
+        if (performance.now() - started > timeoutMs) {
+          this.completeGuidedWalk();
+          if (this.world.transit) {
+            const dest = this.world.forceCompleteTransit(this.compactState());
+            if (dest) {
+              this.placeJustInside(dest);
+              this.markEntered(dest);
+            }
+          }
+          this.holdRemain = 0;
+          resolve(this.world.current);
+          return;
+        }
+        setTimeout(tick, 16);
+      };
+      setTimeout(tick, 16);
+    });
   }
 
   private markEntered(room: BuiltRoom): void {
-    if (this.lastEnteredRoomId === room.id) return;
+    if (this.lastEnteredRoomId === room.id) {
+      this.resetTunnelClockRuntime();
+      return;
+    }
+    if (this.tunnelWalkStartedAt > 0) {
+      this.recordTunnelWalk(performance.now() - this.tunnelWalkStartedAt);
+    } else {
+      this.resetTunnelClockRuntime();
+    }
     this.lastEnteredRoomId = room.id;
     this.stayRoomId = room.id;
     this.stayRemain = 2.8;
     this.lastTransitId = null;
+    this.generationHoldUntil = 0;
     this.entity.grace = 1.8;
     this.onEnter(room);
   }

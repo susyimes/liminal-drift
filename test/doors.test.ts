@@ -5,6 +5,7 @@ import {
   doorAwaitingDecision,
   doorGenerationTimedOut,
   doorNeedsForcedFallback,
+  doorShouldBlock,
   initialDoorGeneration,
 } from "../client/src/game/doors.ts";
 import { doorShimmerOpacity, tubeFlickerMul } from "../client/src/game/lighting.ts";
@@ -56,6 +57,15 @@ test("pending timeout latch fires after prefetch budget", () => {
   assert.equal(doorGenerationTimedOut(0, 5000, 1100), false);
   assert.equal(doorGenerationTimedOut(1000, 1500, 1100), false);
   assert.equal(doorGenerationTimedOut(1000, 2200, 1100), true);
+});
+
+test("pending generation must not seal the jamb — wait happens inside hold", () => {
+  const pending = { connectedRoomId: null, generation: "pending" as const };
+  assert.equal(doorShouldBlock(pending, false), false);
+  assert.equal(doorShouldBlock({ ...pending, locked: true }, false), true);
+  assert.equal(doorShouldBlock({ isExit: true }, false), true);
+  assert.equal(doorShouldBlock({ fake: true }, false), true);
+  assert.equal(doorShouldBlock({ isExit: true }, true), false);
 });
 
 test("hung pending door must force a sync fallback, not stay sealed", () => {
