@@ -42,7 +42,9 @@ import { enterExposureDip, enterFadeOpacity, enterVignetteAdd, tunnelFogHex, tun
 import { TUNNEL_EXIT_T, TUNNEL_START_INSET, pointAlongTunnel, tunnelProgress, tunnelWalkYaw } from "./transit.ts";
 import {
   type TunnelClockReport,
+  beginArmedWait,
   tunnelClockPhase,
+  tunnelWaitMs,
   tunnelWalkDurationMs,
   tunnelWalkKind,
   tunnelWalkProgress,
@@ -106,6 +108,7 @@ export class Game {
   private lastTransitId: string | null = null;
   private holdRemain = 0;
   private skipEnterHold = false;
+  private pendingGenerationHoldMs = 0;
   private generationHoldUntil = 0;
   private tunnelHoldStartedAt = 0;
   private tunnelWaitStartedAt = 0;
@@ -175,9 +178,18 @@ export class Game {
     return this.lastTunnel;
   }
 
-  /** Playtest: keep dest "not ready" so generation lag stays in wait, not walk. */
+  /** Playtest: next throat spends `ms` in Wait (dest not ready). Clock starts at Wait, not at this call. */
   armGenerationHold(ms: number): void {
-    this.generationHoldUntil = performance.now() + Math.max(0, ms);
+    const hold = Math.max(0, ms);
+    if (this.world.transit) {
+      const armed = beginArmedWait(performance.now(), hold);
+      this.generationHoldUntil = armed.holdUntil;
+      if (this.tunnelWaitStartedAt === 0) this.tunnelWaitStartedAt = armed.waitStartedAt;
+      this.pendingGenerationHoldMs = 0;
+      return;
+    }
+    this.pendingGenerationHoldMs = hold;
+    this.generationHoldUntil = 0;
   }
 
   async stepUnexploredDoor(): Promise<{
@@ -283,6 +295,7 @@ export class Game {
     this.lastTransitId = null;
     this.holdRemain = 0;
     this.skipEnterHold = false;
+    this.pendingGenerationHoldMs = 0;
     this.generationHoldUntil = 0;
     this.resetTunnelClockRuntime();
     this.lastWalkMs = null;
@@ -649,12 +662,22 @@ export class Game {
     this.tunnelWaitStartedAt = 0;
     this.tunnelWalkStartedAt = 0;
     this.tunnelWalkTargetMs = 0;
+    this.applyPendingGenerationHold();
     const entrance = this.tunnelEntrance(tunnel);
     this.player.x = entrance.x;
     this.player.z = entrance.z;
     this.player.yaw = tunnelWalkYaw(tunnel.dir);
     this.player.pitch = 0;
     this.scheduleThroatWalk();
+  }
+
+  /** Start the armed Wait clock at throat enter so prefetch time cannot erase waitMs. */
+  private applyPendingGenerationHold(): void {
+    if (this.pendingGenerationHoldMs <= 0) return;
+    const armed = beginArmedWait(performance.now(), this.pendingGenerationHoldMs);
+    this.generationHoldUntil = armed.holdUntil;
+    this.tunnelWaitStartedAt = armed.waitStartedAt;
+    this.pendingGenerationHoldMs = 0;
   }
 
   private destReadyForWalk(): boolean {
@@ -758,10 +781,7 @@ export class Game {
     const holdEnd = this.tunnelWaitStartedAt || this.tunnelWalkStartedAt || performance.now();
     const holdMs =
       this.didEnterHold && this.tunnelHoldStartedAt > 0 ? Math.round(Math.max(0, holdEnd - this.tunnelHoldStartedAt)) : 0;
-    const waitMs =
-      this.tunnelWaitStartedAt > 0 && this.tunnelWalkStartedAt > 0
-        ? Math.round(Math.max(0, this.tunnelWalkStartedAt - this.tunnelWaitStartedAt))
-        : 0;
+    const waitMs = tunnelWaitMs(this.tunnelWaitStartedAt, this.tunnelWalkStartedAt);
     const elapsed = Math.round(elapsedMs);
     const walkMs =
       this.tunnelWalkTargetMs > 0 ? Math.min(elapsed, this.tunnelWalkTargetMs + 32) : elapsed;
@@ -834,6 +854,7 @@ export class Game {
     this.stayRemain = 2.8;
     this.lastTransitId = null;
     this.generationHoldUntil = 0;
+    this.pendingGenerationHoldMs = 0;
     this.entity.grace = 1.8;
     this.onEnter(room);
   }
