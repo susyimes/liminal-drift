@@ -98,3 +98,54 @@ export function waitMsForCrossing(opts: { armedMs: number; destReadyMs?: number 
 export function armedWaitInSlop(waitMs: number, armedMs: number, slop = 100): boolean {
   return Math.abs(waitMs - armedMs) <= slop;
 }
+
+/** Supervisor: |wall − (waitMs + walkMs)| ≲ 150 around await stepUnexploredDoor(). */
+export const STEP_WALL_SLOP_MS = 150;
+
+/**
+ * In-band walk target. Short/medium/long stay inside 800–1400; never below the floor.
+ */
+export function inBandWalkTargetMs(dest?: string | null, requested?: TunnelWalkKind): number {
+  const raw = tunnelWalkDurationMs(dest, requested);
+  return Math.max(TUNNEL_WALK_MS_MIN, Math.min(TUNNEL_WALK_MS_MAX, raw));
+}
+
+/** Remaining throat-walk time. Force-complete must wait this out — never land under 800ms. */
+export function walkRemainMs(elapsedMs: number, targetMs: number): number {
+  const need = Math.max(TUNNEL_WALK_MS_MIN, targetMs > 0 ? targetMs : TUNNEL_WALK_MS.medium);
+  return Math.max(0, need - Math.max(0, elapsedMs));
+}
+
+export function walkHasPlayedInBand(elapsedMs: number, targetMs = 0): boolean {
+  return walkRemainMs(elapsedMs, targetMs) <= 0;
+}
+
+/**
+ * Book walk-only ms after a real in-band walk. Never report a sub-800 cut as a walk.
+ */
+export function bookedWalkMs(elapsedMs: number, targetMs: number): number | null {
+  if (!walkHasPlayedInBand(elapsedMs, targetMs)) return null;
+  const elapsed = Math.round(Math.max(0, elapsedMs));
+  if (targetMs > 0) return Math.min(elapsed, targetMs + 32);
+  return elapsed;
+}
+
+/** Instrumented step await may only cover Wait + Walk (+ slop). */
+export function stepAwaitBudgetMs(waitMs: number, walkMs = TUNNEL_WALK_MS_MAX): number {
+  const walk = Math.max(TUNNEL_WALK_MS_MIN, Math.min(TUNNEL_WALK_MS_MAX, walkMs));
+  return Math.max(0, waitMs) + walk + STEP_WALL_SLOP_MS;
+}
+
+export function wallBooksAligned(
+  wallMs: number,
+  waitMs: number,
+  walkMs: number,
+  slop = STEP_WALL_SLOP_MS,
+): boolean {
+  return Math.abs(wallMs - (waitMs + walkMs)) <= slop;
+}
+
+/** Once the walk clock is running, late Jev / dest overwrite must not cut it short. */
+export function destLockedForWalk(walkStartedAt: number): boolean {
+  return walkStartedAt > 0;
+}

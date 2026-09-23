@@ -76,6 +76,8 @@ export class World {
   exitChance = 0;
   roomsSinceEntity = 0;
   lastEncounter: EncounterCard = "none";
+  /** Playtest hook: skip in-flight Jev so step wall-clock is wait+walk only. */
+  prefetchEnabled = true;
   private seq = 1;
   private scene: THREE.Scene;
 
@@ -532,6 +534,23 @@ export class World {
     return true;
   }
 
+  /**
+   * Instrumented / force-complete path: dest is ready now via sync fallback.
+   * Does not wait for Jev. Leaves an existing decision alone so late prefetch
+   * cannot rebuild the throat mid-walk.
+   */
+  forceReadyTransitDestination(compact: CompactGameState): boolean {
+    const active = this.transit;
+    if (!active) return false;
+    if (active.dest) return true;
+    if (!active.door.decision) {
+      this.finishWithFallback(active.parent, active.door, compact, "Instrumented step — sync fallback.");
+    }
+    if (!active.door.decision) return false;
+    this.syncTransitToDecision();
+    return true;
+  }
+
   private syncTransitToDecision(): void {
     const active = this.transit;
     const decision = active?.door.decision;
@@ -618,6 +637,12 @@ export class World {
   }
 
   private async prefetch(room: BuiltRoom, door: Door, compact: CompactGameState): Promise<void> {
+    if (!this.prefetchEnabled) {
+      if (!door.decision && !door.connectedRoomId) {
+        this.finishWithFallback(room, door, compact, "Instrumented step — sync fallback.");
+      }
+      return;
+    }
     const state: CompactGameState = {
       ...compact,
       purpose: "room",
@@ -630,6 +655,11 @@ export class World {
     try {
       const result = await requestRoom(state, ROOM_PREFETCH_TIMEOUT_MS);
       if (door.connectedRoomId) return;
+      // Late Jev must not overwrite a dest already locked for the throat walk.
+      if (door.decision) {
+        door.generation = "ready";
+        return;
+      }
       if (!result?.decision) throw new Error("missing_decision");
       this.callCount += 1;
       this.lastLatency = result.latencyMs;

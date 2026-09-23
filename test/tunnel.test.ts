@@ -17,9 +17,16 @@ import {
   tunnelWalkYaw,
 } from "../client/src/game/transit.ts";
 import {
+  STEP_WALL_SLOP_MS,
   TUNNEL_WALK_MS,
+  TUNNEL_WALK_MS_MAX,
+  TUNNEL_WALK_MS_MIN,
   armedWaitInSlop,
   beginArmedWait,
+  bookedWalkMs,
+  destLockedForWalk,
+  inBandWalkTargetMs,
+  stepAwaitBudgetMs,
   tunnelClockPhase,
   tunnelWaitMs,
   tunnelWalkDurationMs,
@@ -28,7 +35,10 @@ import {
   tunnelWalkProgress,
   tunnelWalkU,
   waitMsForCrossing,
+  walkHasPlayedInBand,
   walkMsInBand,
+  walkRemainMs,
+  wallBooksAligned,
 } from "../client/src/game/tunnelClock.ts";
 
 test("tunnel lengths stay a 0.8–1.4s walk, not a cutscene", () => {
@@ -132,6 +142,40 @@ test("EaseInOut is on time, so a late destination does not stretch the walk", ()
   const tunnel = { entry: { x: 0, z: 0 }, exit: { x: 0, z: -10 } };
   const point = pointAlongTunnel(tunnel, 0.5);
   assert.ok(Math.abs(point.z + 5) < 1e-9);
+});
+
+test("throat walk never books a sub-800 cut as a walk", () => {
+  assert.equal(TUNNEL_WALK_MS_MIN, 800);
+  assert.equal(bookedWalkMs(386, 1120), null);
+  assert.equal(bookedWalkMs(386, 880), null);
+  assert.equal(bookedWalkMs(799, TUNNEL_WALK_MS.short), null);
+  assert.ok(walkMsInBand(bookedWalkMs(880, TUNNEL_WALK_MS.short)!));
+  assert.ok(walkMsInBand(bookedWalkMs(1152, TUNNEL_WALK_MS.medium)!));
+  assert.equal(walkRemainMs(386, 1120) > 0, true);
+  assert.ok(walkRemainMs(386, 880) >= 800 - 386);
+  assert.equal(walkHasPlayedInBand(386, 1120), false);
+  assert.equal(walkHasPlayedInBand(1120, 1120), true);
+  assert.equal(walkRemainMs(0, 0) >= TUNNEL_WALK_MS_MIN, true);
+  for (const dest of ["empty_office", "hotel_hall", "maze_cubicles", "poolcore", "flooded_lobby", "stairwell"] as const) {
+    const target = inBandWalkTargetMs(dest);
+    assert.ok(target >= 800 && target <= 1400, `${dest} ${target}`);
+    assert.equal(walkRemainMs(target, target), 0);
+  }
+});
+
+test("step await wall is wait+walk only (±150), not prefetch/hold/settle", () => {
+  assert.equal(STEP_WALL_SLOP_MS, 150);
+  assert.equal(stepAwaitBudgetMs(1800, 1120), 1800 + 1120 + 150);
+  assert.equal(stepAwaitBudgetMs(0, 1152), 1152 + 150);
+  assert.ok(wallBooksAligned(2949, 1800, 1124));
+  assert.ok(wallBooksAligned(1145, 0, 1152));
+  assert.equal(wallBooksAligned(4570, 1800, 386), false);
+  assert.equal(wallBooksAligned(6535, 1800, 1152), false);
+  assert.equal(wallBooksAligned(4144, 0, 1152), false);
+  assert.equal(destLockedForWalk(0), false);
+  assert.equal(destLockedForWalk(100), true);
+  assert.ok(armedWaitInSlop(1800, 1800));
+  assert.ok(walkMsInBand(TUNNEL_WALK_MS_MAX));
 });
 
 test("tunnel tubes stay in a calm band", () => {

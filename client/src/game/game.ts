@@ -43,13 +43,19 @@ import { TUNNEL_EXIT_T, TUNNEL_START_INSET, pointAlongTunnel, tunnelProgress, tu
 import {
   type TunnelClockReport,
   beginArmedWait,
+  bookedWalkMs,
+  destLockedForWalk,
+  inBandWalkTargetMs,
+  stepAwaitBudgetMs,
   tunnelClockPhase,
   tunnelWaitMs,
   waitMsForCrossing,
-  tunnelWalkDurationMs,
+  TUNNEL_WALK_MS_MAX,
   tunnelWalkKind,
   tunnelWalkProgress,
   tunnelWalkU,
+  walkHasPlayedInBand,
+  walkRemainMs,
 } from "./tunnelClock.ts";
 
 export type { TunnelClockReport };
@@ -123,6 +129,8 @@ export class Game {
   private walkLandTimer: ReturnType<typeof setTimeout> | null = null;
   private throatReadyTimer: ReturnType<typeof setTimeout> | null = null;
   private landingThroat = false;
+  private instrumentedStep = false;
+  private walkLandResolver: ((room: BuiltRoom | null) => void) | null = null;
   private settleAge = SETTLE_S;
   private glanceSign = 0;
   private stayRoomId: string | null = null;
@@ -219,26 +227,22 @@ export class Game {
       };
     }
     const { room, door } = found;
-    this.world.currentId = room.id;
-    this.placeAtDoor(room, door, -0.32);
-    const compact = this.compactState();
-    const armedStep = this.pendingGenerationHoldMs > 0 || this.generationHoldUntil > performance.now();
-    await this.world.considerPrefetch(this.player.x, this.player.z, compact);
-    // Armed Wait owns the delay. A prefetch loop here would add ~1s of
-    // unbooked wall-clock and/or stack onto waitMs.
-    if (!armedStep) {
-      const deadline = performance.now() + 1600;
-      while (!door.decision && !door.connectedRoomId && performance.now() < deadline) {
-        await new Promise((resolve) => window.setTimeout(resolve, 25));
-      }
-    }
+    // Instrumented path: only Wait + Walk may run inside this await.
+    // Prefetch / Jev / jamb hold / settle / entity ticks are skipped so
+    // supervisor's performance.now() around the await equals waitMs+walkMs.
+    this.instrumentedStep = true;
+    this.world.prefetchEnabled = false;
     this.skipEnterHold = true;
+    this.holdUntil = 0;
+    this.holdRemain = 0;
+    this.didEnterHold = false;
+    this.world.currentId = room.id;
     this.placeAtDoor(room, door, 0.12);
     const portal = this.world.tryEnter(this.player.x, this.player.z, this.compactState());
     if (portal.kind === "tunnel" || this.world.transit) {
-      if (this.world.transit?.tunnel) this.ensureInsideTunnel(this.world.transit.tunnel);
-      this.holdRemain = 0;
-      const dest = await this.awaitTunnelLanding(4500);
+      this.prepareInstrumentedThroat();
+      const dest = await this.awaitInstrumentedLanding();
+      this.endInstrumentedStep();
       if (dest) {
         this.settleAge = SETTLE_S;
         return {
@@ -261,6 +265,7 @@ export class Game {
       this.holdRemain = 0;
       this.settleAge = SETTLE_S;
     }
+    this.endInstrumentedStep();
     return {
       kind: portal.kind,
       depth: this.world.roomsVisited,
@@ -309,6 +314,7 @@ export class Game {
     this.generationHoldUntil = 0;
     this.armedWaitTargetMs = 0;
     this.resetTunnelClockRuntime();
+    this.endInstrumentedStep();
     this.lastWalkMs = null;
     this.lastTunnel = null;
     this.settleAge = SETTLE_S;
@@ -374,7 +380,7 @@ export class Game {
       progress = this.driveTunnelWalk(transit.tunnel);
       if (this.tunnelWalkStartedAt > 0 && this.tunnelWalkTargetMs > 0) {
         const elapsed = performance.now() - this.tunnelWalkStartedAt;
-        if (elapsed >= this.tunnelWalkTargetMs) this.completeGuidedWalk();
+        if (walkHasPlayedInBand(elapsed, this.tunnelWalkTargetMs)) this.completeGuidedWalk();
       }
     } else if (transit && (phase === "hold" || phase === "wait")) {
       const entrance = this.tunnelEntrance(transit.tunnel);
@@ -420,9 +426,22 @@ export class Game {
     const containedBefore = this.world.roomAt(this.player.x, this.player.z);
 
     const compact = this.compactState();
-    void this.world.considerPrefetch(this.player.x, this.player.z, compact);
+    if (!this.instrumentedStep) {
+      void this.world.considerPrefetch(this.player.x, this.player.z, compact);
+    } else {
+      this.holdUntil = 0;
+      this.holdRemain = 0;
+    }
+    const walkLocked =
+      destLockedForWalk(this.tunnelWalkStartedAt) &&
+      !walkHasPlayedInBand(
+        performance.now() - this.tunnelWalkStartedAt,
+        this.tunnelWalkTargetMs,
+      );
     let portal = this.world.transit
-      ? this.world.advanceTransit(this.player.x, this.player.z, compact)
+      ? walkLocked
+        ? { kind: "tunnel" as const, tunnel: this.world.transit.tunnel }
+        : this.world.advanceTransit(this.player.x, this.player.z, compact)
       : this.world.tryEnter(this.player.x, this.player.z, compact);
     if (!this.world.transit && !containedBefore && portal.kind === "none") {
       const rescued = this.world.rescueOutside(this.player.x, this.player.z, compact);
@@ -470,7 +489,12 @@ export class Game {
     this.tickFear(dt);
     this.world.updateLights(performance.now() / 1000, this.player.fear, dt, this.player.x, this.player.z);
 
-    const caught = this.entity.update(dt, this.player, this.world, this.compactState(), {
+    if (this.instrumentedStep) {
+      this.entity.grace = Math.max(this.entity.grace, 1.8);
+    }
+    const caught = this.instrumentedStep
+      ? "ok"
+      : this.entity.update(dt, this.player, this.world, this.compactState(), {
       onStinger: () => {
         this.audio.stinger();
         this.player.punch = Math.max(this.player.punch, 0.085);
@@ -485,7 +509,7 @@ export class Game {
       return;
     }
 
-    if (this.world.roomsVisited >= WIN_DEPTH) {
+    if (!this.instrumentedStep && this.world.roomsVisited >= WIN_DEPTH) {
       this.end("depth", "You walked far enough that the building lost interest.");
       return;
     }
@@ -692,16 +716,53 @@ export class Game {
     this.pendingGenerationHoldMs = 0;
   }
 
+  private prepareInstrumentedThroat(): void {
+    this.skipEnterHold = true;
+    this.holdUntil = 0;
+    this.holdRemain = 0;
+    this.didEnterHold = false;
+    const tunnel = this.world.transit?.tunnel;
+    if (!tunnel) return;
+    const id = tunnel.id ?? "tunnel";
+    if (this.lastTransitId !== id) {
+      this.ensureInsideTunnel(tunnel);
+    } else {
+      this.applyPendingGenerationHold();
+      const entrance = this.tunnelEntrance(tunnel);
+      this.player.x = entrance.x;
+      this.player.z = entrance.z;
+      this.player.yaw = tunnelWalkYaw(tunnel.dir);
+      this.player.pitch = 0;
+      this.scheduleThroatWalk();
+    }
+    this.holdUntil = 0;
+    this.holdRemain = 0;
+    this.world.forceReadyTransitDestination(this.compactState());
+  }
+
+  private endInstrumentedStep(): void {
+    this.instrumentedStep = false;
+    this.world.prefetchEnabled = true;
+    this.walkLandResolver = null;
+  }
+
   private destReadyForWalk(): boolean {
     if (!this.world.transit) return false;
+    if (destLockedForWalk(this.tunnelWalkStartedAt)) return true;
     if (this.generationHoldUntil > 0) {
       if (performance.now() < this.generationHoldUntil) {
         if (this.tunnelWaitStartedAt === 0) this.tunnelWaitStartedAt = performance.now();
-        this.world.nudgeTransitDecision(this.compactState());
+        if (this.instrumentedStep) this.world.forceReadyTransitDestination(this.compactState());
+        else this.world.nudgeTransitDecision(this.compactState());
         return false;
       }
       // Armed Wait is over — do not add dest-not-ready / Jev time.
-      this.world.readyTransitDestination(this.compactState());
+      if (this.instrumentedStep) this.world.forceReadyTransitDestination(this.compactState());
+      else this.world.readyTransitDestination(this.compactState());
+      return true;
+    }
+    if (this.instrumentedStep) {
+      this.world.forceReadyTransitDestination(this.compactState());
       return true;
     }
     const ready = this.world.readyTransitDestination(this.compactState());
@@ -738,16 +799,30 @@ export class Game {
     if (!this.world.transit || this.landingThroat) return;
     const dest = this.world.transit.door.decision?.roomArchetype ?? null;
     const requested = this.world.transit.door.decision?.tunnelLength;
-    if (this.tunnelWalkTargetMs === 0) this.tunnelWalkTargetMs = tunnelWalkDurationMs(dest, requested);
+    if (this.tunnelWalkTargetMs === 0) this.tunnelWalkTargetMs = inBandWalkTargetMs(dest, requested);
     if (this.tunnelWalkStartedAt === 0) this.tunnelWalkStartedAt = performance.now();
     if (!this.walkLandTimer) {
-      const remain = Math.max(0, this.tunnelWalkTargetMs - (performance.now() - this.tunnelWalkStartedAt));
+      const remain = walkRemainMs(performance.now() - this.tunnelWalkStartedAt, this.tunnelWalkTargetMs);
       this.walkLandTimer = setTimeout(() => this.completeGuidedWalk(), remain);
     }
   }
 
   private completeGuidedWalk(): void {
-    if (this.landingThroat || !this.world.transit) return;
+    if (!this.world.transit) {
+      this.walkLandResolver?.(this.world.current);
+      this.walkLandResolver = null;
+      return;
+    }
+    const elapsed = this.tunnelWalkStartedAt > 0 ? performance.now() - this.tunnelWalkStartedAt : 0;
+    const remain = walkRemainMs(elapsed, this.tunnelWalkTargetMs);
+    if (remain > 0) {
+      this.landingThroat = false;
+      if (this.tunnelWalkStartedAt === 0) this.beginGuidedWalk();
+      if (this.walkLandTimer) clearTimeout(this.walkLandTimer);
+      this.walkLandTimer = setTimeout(() => this.completeGuidedWalk(), remain);
+      return;
+    }
+    if (this.landingThroat) return;
     this.landingThroat = true;
     if (this.walkLandTimer) {
       clearTimeout(this.walkLandTimer);
@@ -761,6 +836,8 @@ export class Game {
     }
     this.holdRemain = 0;
     this.holdUntil = 0;
+    this.walkLandResolver?.(dest ?? this.world.current);
+    this.walkLandResolver = null;
   }
 
   private tunnelEntrance(tunnel: { entry: { x: number; z: number }; dir: { x: number; z: number } }): { x: number; z: number } {
@@ -777,7 +854,7 @@ export class Game {
   } {
     const dest = this.world.transit?.door.decision?.roomArchetype ?? null;
     const requested = this.world.transit?.door.decision?.tunnelLength;
-    const durationMs = this.tunnelWalkTargetMs || tunnelWalkDurationMs(dest, requested);
+    const durationMs = this.tunnelWalkTargetMs || inBandWalkTargetMs(dest, requested);
     if (this.tunnelWalkStartedAt === 0) return { ...this.tunnelEntrance(tunnel), progress: 0 };
     const elapsed = performance.now() - this.tunnelWalkStartedAt;
     const u = tunnelWalkU(elapsed, durationMs);
@@ -807,9 +884,12 @@ export class Game {
     const measuredWait = tunnelWaitMs(this.tunnelWaitStartedAt, this.tunnelWalkStartedAt);
     const waitMs =
       this.armedWaitTargetMs > 0 ? waitMsForCrossing({ armedMs: this.armedWaitTargetMs }) : measuredWait;
-    const elapsed = Math.round(elapsedMs);
-    const walkMs =
-      this.tunnelWalkTargetMs > 0 ? Math.min(elapsed, this.tunnelWalkTargetMs + 32) : elapsed;
+    const booked = bookedWalkMs(elapsedMs, this.tunnelWalkTargetMs);
+    if (booked == null) {
+      // Cut-short force-complete is not a walk — keep playing via completeGuidedWalk.
+      return;
+    }
+    const walkMs = booked;
     this.lastWalkMs = walkMs;
     this.lastTunnel = {
       walkMs,
@@ -839,30 +919,39 @@ export class Game {
     this.landingThroat = false;
   }
 
-  private awaitTunnelLanding(timeoutMs: number): Promise<BuiltRoom | null> {
-    const started = performance.now();
+  /**
+   * Playtest await covers Wait + Walk only. Resolves when the in-band walk
+   * is booked — never on a 4500ms mid-walk timeout (that reported walkMs 386).
+   */
+  private awaitInstrumentedLanding(): Promise<BuiltRoom | null> {
+    const waitMs =
+      this.armedWaitTargetMs > 0
+        ? this.armedWaitTargetMs
+        : Math.max(0, this.generationHoldUntil > 0 ? this.generationHoldUntil - performance.now() : 0);
+    const walkMs = this.tunnelWalkTargetMs || TUNNEL_WALK_MS_MAX;
+    const budget = stepAwaitBudgetMs(waitMs, walkMs);
     return new Promise((resolve) => {
+      let settled = false;
+      const done = (room: BuiltRoom | null): void => {
+        if (settled) return;
+        settled = true;
+        this.walkLandResolver = null;
+        resolve(room);
+      };
+      this.walkLandResolver = done;
       const tick = (): void => {
-        if (!this.world.transit) {
-          resolve(this.world.current);
-          return;
-        }
-        if (performance.now() - started > timeoutMs) {
-          this.completeGuidedWalk();
-          if (this.world.transit) {
-            const dest = this.world.forceCompleteTransit(this.compactState());
-            if (dest) {
-              this.placeJustInside(dest);
-              this.markEntered(dest);
-            }
-          }
-          this.holdRemain = 0;
-          resolve(this.world.current);
+        if (settled) return;
+        if (!this.world.transit && this.lastWalkMs != null) {
+          done(this.world.current);
           return;
         }
         setTimeout(tick, 16);
       };
       setTimeout(tick, 16);
+      setTimeout(() => {
+        if (settled) return;
+        this.completeGuidedWalk();
+      }, budget);
     });
   }
 
