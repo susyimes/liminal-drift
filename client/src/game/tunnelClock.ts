@@ -85,3 +85,16 @@ export function tunnelWaitMs(waitStartedAt: number, walkStartedAt: number): numb
   if (waitStartedAt <= 0 || walkStartedAt <= 0) return 0;
   return Math.round(Math.max(0, walkStartedAt - waitStartedAt));
 }
+
+/**
+ * When armed, Wait is exactly the arm. Dest / Jev / prefetch latency must
+ * not add on top (playtest hook: waitMs === armedMs ± 100).
+ */
+export function waitMsForCrossing(opts: { armedMs: number; destReadyMs?: number }): number {
+  if (opts.armedMs > 0) return Math.max(0, Math.round(opts.armedMs));
+  return Math.max(0, Math.round(opts.destReadyMs ?? 0));
+}
+
+export function armedWaitInSlop(waitMs: number, armedMs: number, slop = 100): boolean {
+  return Math.abs(waitMs - armedMs) <= slop;
+}
