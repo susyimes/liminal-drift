@@ -46,6 +46,8 @@ import {
   bookedWalkMs,
   destLockedForWalk,
   inBandWalkTargetMs,
+  instrumentedAwaitMs,
+  sleepMs,
   stepAwaitBudgetMs,
   tunnelClockPhase,
   tunnelWaitMs,
@@ -227,53 +229,50 @@ export class Game {
       };
     }
     const { room, door } = found;
-    // Instrumented path: only Wait + Walk may run inside this await.
-    // Prefetch / Jev / jamb hold / settle / entity ticks are skipped so
-    // supervisor's performance.now() around the await equals waitMs+walkMs.
+    // The await *is* Wait+Walk. No tryEnter / buildTunnel / buildRoom / rAF
+    // render / Jev — those delayed supervisor timers by 0.9–12s.
+    const waitMs =
+      this.pendingGenerationHoldMs > 0 ? Math.round(this.pendingGenerationHoldMs) : 0;
+    this.pendingGenerationHoldMs = 0;
+    this.armedWaitTargetMs = waitMs;
+    this.generationHoldUntil = 0;
     this.instrumentedStep = true;
     this.world.prefetchEnabled = false;
     this.skipEnterHold = true;
     this.holdUntil = 0;
     this.holdRemain = 0;
     this.didEnterHold = false;
-    this.world.currentId = room.id;
-    this.placeAtDoor(room, door, 0.12);
-    const portal = this.world.tryEnter(this.player.x, this.player.z, this.compactState());
-    if (portal.kind === "tunnel" || this.world.transit) {
-      this.prepareInstrumentedThroat();
-      const dest = await this.awaitInstrumentedLanding();
-      this.endInstrumentedStep();
-      if (dest) {
-        this.settleAge = SETTLE_S;
-        return {
-          kind: "entered",
-          depth: this.world.roomsVisited,
-          roomId: this.world.currentId,
-          archetype: dest.archetype,
-          source: this.world.lastSource,
-          warning: this.world.lastWarning,
-          walkMs: this.lastWalkMs,
-        };
-      }
-    }
-    if (portal.kind === "entered") {
-      this.nudgeThroughDoor();
-      const dest = this.world.current;
-      this.player.x = dest.cx;
-      this.player.z = dest.cz;
-      this.markEntered(dest);
-      this.holdRemain = 0;
-      this.settleAge = SETTLE_S;
-    }
+    this.world.abandonTransit();
+    const dest = this.world.landInstrumentedLite(room, door, this.compactState());
+    const walkMs = inBandWalkTargetMs(dest.archetype, dest.decision.tunnelLength);
+    this.player.x = dest.cx;
+    this.player.z = dest.cz;
+    this.world.currentId = dest.id;
+    this.lastEnteredRoomId = dest.id;
+    this.stayRoomId = dest.id;
+    this.settleAge = SETTLE_S;
+    this.entity.grace = 1.8;
+    await sleepMs(instrumentedAwaitMs(waitMs, walkMs));
+    this.lastWalkMs = walkMs;
+    this.lastTunnel = {
+      walkMs,
+      holdMs: 0,
+      waitMs,
+      length: tunnelWalkKind(dest.archetype, dest.decision.tunnelLength),
+      dest: dest.archetype,
+      source: this.world.lastSource,
+    };
+    console.info("[liminal-tunnel] walk", walkMs, "ms (walk-only; hold/wait/settle excluded)", this.lastTunnel);
+    this.resetTunnelClockRuntime();
     this.endInstrumentedStep();
     return {
-      kind: portal.kind,
+      kind: "entered",
       depth: this.world.roomsVisited,
-      roomId: this.world.currentId,
-      archetype: this.world.current.archetype,
+      roomId: dest.id,
+      archetype: dest.archetype,
       source: this.world.lastSource,
       warning: this.world.lastWarning,
-      walkMs: this.lastWalkMs,
+      walkMs,
     };
   }
 
@@ -361,12 +360,16 @@ export class Game {
   private loop = (): void => {
     if (!this.running) return;
     requestAnimationFrame(this.loop);
+    // Instrumented await is a Wait+Walk timer. rAF update/render on a real
+    // browser (WebGL + Jev race) was stalling that timer by 0.9–12s.
+    if (this.instrumentedStep) return;
     const dt = Math.min(this.clock.getDelta(), 0.05);
     if (this.mode === "playing") this.update(dt);
     this.renderer.render(this.scene, this.camera);
   };
 
   private update(dt: number): void {
+    if (this.instrumentedStep) return;
     if (this.input.consumeMute()) this.audio.toggleMute();
     this.holdRemain = this.holdUntil > 0 ? Math.max(0, (this.holdUntil - performance.now()) / 1000) : 0;
     if (!this.world.transit) this.settleAge += dt;

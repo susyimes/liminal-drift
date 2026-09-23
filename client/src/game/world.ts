@@ -28,6 +28,7 @@ import {
   type Aabb,
 } from "./math.ts";
 import {
+  buildLiteRoom,
   buildRoom,
   doorOutward,
   doorWorldPos,
@@ -549,6 +550,70 @@ export class World {
     if (!active.door.decision) return false;
     this.syncTransitToDecision();
     return true;
+  }
+
+  /** Drop an in-flight throat without spawning (instrumented await must not build). */
+  abandonTransit(): void {
+    this.transit = null;
+  }
+
+  /**
+   * DEPTH + next-door graph without buildRoom / buildTunnel. Used by the
+   * playtest hook so the await is only Wait+Walk.
+   */
+  landInstrumentedLite(parent: BuiltRoom, door: Door, compact: CompactGameState): BuiltRoom {
+    if (door.connectedRoomId) {
+      const already = this.rooms.get(door.connectedRoomId);
+      if (already) {
+        this.currentId = already.id;
+        return already;
+      }
+    }
+    if (!door.decision) {
+      this.finishWithFallback(parent, door, compact, "Instrumented step — sync fallback.");
+    }
+    const decision =
+      door.decision ??
+      fallbackRoomDecision(
+        {
+          ...compact,
+          purpose: "room",
+          portal: { id: door.id, fromArchetype: parent.archetype, direction: door.worldWall },
+        },
+        door.id,
+      );
+    door.decision = decision;
+    door.generation = "ready";
+    const out = doorOutward(parent, door);
+    const pos = doorWorldPos(parent, door);
+    const id = `r${this.seq}`;
+    this.seq += 1;
+    const room = buildLiteRoom({
+      id,
+      decision,
+      cx: pos.x + out.x * 8,
+      cz: pos.z + out.z * 8,
+      entryWorldWall: door.worldWall,
+    });
+    const entry = room.doors[0];
+    if (entry) {
+      entry.connectedRoomId = parent.id;
+      entry.generation = "ready";
+    }
+    door.connectedRoomId = room.id;
+    this.addRoom(room);
+    this.roomsVisited += 1;
+    this.currentId = room.id;
+    this.lastSource = this.lastSource || "fallback";
+    this.lastWarning = this.lastWarning ?? "Instrumented step — sync fallback.";
+    this.log.push({
+      depth: this.roomsVisited,
+      roomId: room.id,
+      source: this.lastSource,
+      decision,
+      latencyMs: 0,
+    });
+    return room;
   }
 
   private syncTransitToDecision(): void {
