@@ -9,7 +9,7 @@ import {
   type RoomLogEntry,
 } from "@liminal/shared";
 import { requestRoom } from "../api.ts";
-import { connectedDoorShouldEnter, doorAwaitingDecision, doorNeedsForcedFallback } from "./doors.ts";
+import { connectedDoorShouldEnter, doorAwaitingDecision, doorNeedsForcedFallback, doorShouldBlock } from "./doors.ts";
 import {
   DOOR_SHIMMER_NEAR,
   doorFrameHex,
@@ -122,13 +122,8 @@ export class World {
     const extra: Aabb[] = [];
     for (const room of this.rooms.values()) {
       for (const door of room.doors) {
-        const sealExit = door.isExit;
-        const sealFake = door.fake || door.isFalseExit;
-        const sealLocked = door.locked;
         const inThisTransit = this.transit?.door.id === door.id;
-        const sealPending =
-          !door.connectedRoomId && door.generation !== "ready" && !door.isExit && !door.fake && !inThisTransit;
-        if (!sealExit && !sealPending && !sealFake && !sealLocked) continue;
+        if (!doorShouldBlock(door, inThisTransit)) continue;
         const pos = doorWorldPos(room, door);
         const out = doorOutward(room, door);
         extra.push({
@@ -477,14 +472,7 @@ export class World {
     if (!active) return { kind: "none" };
 
     if (!active.door.decision) {
-      const waited = performance.now() - active.startedAt;
-      if (doorNeedsForcedFallback(active.door, performance.now(), ROOM_PREFETCH_TIMEOUT_MS) || waited > 1400) {
-        this.finishWithFallback(active.parent, active.door, compact, "Generation timed out — using fallback.");
-      } else if (active.door.generation !== "pending") {
-        active.door.generation = "pending";
-        active.door.pendingSince = active.startedAt;
-        this.prefetch(active.parent, active.door, compact);
-      }
+      this.nudgeTransitDecision(compact);
     }
 
     const atExit = tunnelReachedExit(active.tunnel, px, pz);
@@ -513,6 +501,62 @@ export class World {
     active.tunnel.farVeil.visible = false;
     this.currentId = dest.id;
     return { kind: "entered", room: dest };
+  }
+
+  /** Prefetch or timeout-fallback. Does not start the throat walk. */
+  nudgeTransitDecision(compact: CompactGameState): void {
+    const active = this.transit;
+    if (!active || active.door.decision) return;
+    if (doorNeedsForcedFallback(active.door, performance.now(), ROOM_PREFETCH_TIMEOUT_MS)) {
+      this.finishWithFallback(active.parent, active.door, compact, "Generation timed out — using fallback.");
+      return;
+    }
+    if (active.door.generation !== "pending") {
+      active.door.generation = "pending";
+      active.door.pendingSince = active.startedAt;
+      this.prefetch(active.parent, active.door, compact);
+    }
+  }
+
+  /**
+   * Decision is ready (Jev or fallback) and the throat matches it.
+   * Does not spawn the dest room — that happens at land so DEPTH ticks then.
+   */
+  readyTransitDestination(compact: CompactGameState): boolean {
+    const active = this.transit;
+    if (!active) return false;
+    if (active.dest) return true;
+    if (!active.door.decision) this.nudgeTransitDecision(compact);
+    if (!active.door.decision) return false;
+    this.syncTransitToDecision();
+    return true;
+  }
+
+  private syncTransitToDecision(): void {
+    const active = this.transit;
+    const decision = active?.door.decision;
+    if (!active || !decision) return;
+    const length = tunnelLengthFor(decision.roomArchetype, decision.tunnelLength);
+    const mood =
+      decision.tunnelMood ?? inferTunnelMood(active.parent.archetype, decision.roomArchetype);
+    tintTunnelSpeck(active.tunnel, decision.roomArchetype, decision.lightingMood ?? mood);
+    if (active.tunnel.lengthKind === length && active.tunnel.mood === mood) return;
+
+    const existingIdx = this.tunnels.indexOf(active.tunnel);
+    this.scene.remove(active.tunnel.group);
+    if (existingIdx >= 0) this.tunnels.splice(existingIdx, 1);
+    const tunnel = buildTunnel({
+      id: active.tunnel.id,
+      parent: active.parent,
+      door: active.door,
+      length,
+      mood,
+      destArchetype: decision.roomArchetype,
+    });
+    tunnel.litAt = active.tunnel.litAt || performance.now();
+    this.tunnels.push(tunnel);
+    this.scene.add(tunnel.group);
+    active.tunnel = tunnel;
   }
 
   forceCompleteTransit(compact: CompactGameState): BuiltRoom | null {

@@ -35,6 +35,7 @@ import {
 } from "../client/src/game/directorFeel.ts";
 import { doorFrameHex, doorVeilOpacity, lightHexForMood } from "../client/src/game/lighting.ts";
 import { tunnelMeters, tunnelWalkSeconds } from "../client/src/game/transit.ts";
+import { TUNNEL_WALK_MS, tunnelWalkDurationMs, walkMsInBand } from "../client/src/game/tunnelClock.ts";
 
 test("poolcore pushes long, yellow office cuts short, walk stays 0.8–1.4s", () => {
   assert.equal(tunnelLengthFor("poolcore", "short"), "long");
@@ -46,7 +47,10 @@ test("poolcore pushes long, yellow office cuts short, walk stays 0.8–1.4s", ()
   for (const dest of ["poolcore", "empty_office", "stairwell"] as const) {
     const seconds = tunnelWalkSeconds(tunnelMeters(tunnelLengthFor(dest, "medium")));
     assert.ok(seconds >= 0.8 && seconds <= 1.4, `${dest} walk ${seconds}s`);
+    assert.ok(walkMsInBand(tunnelWalkDurationMs(dest)), `${dest} clock ${tunnelWalkDurationMs(dest)}`);
   }
+  assert.equal(tunnelWalkDurationMs("poolcore"), TUNNEL_WALK_MS.long);
+  assert.equal(tunnelWalkDurationMs("empty_office"), TUNNEL_WALK_MS.short);
 });
 
 test("enter hold is a half-second jamb beat", () => {

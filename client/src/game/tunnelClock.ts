@@ -1,0 +1,70 @@
+import { tunnelLengthFor } from "./directorFeel.ts";
+import { TUNNEL_EXIT_T } from "./transit.ts";
+
+/** Inclusive walk-only band. Hold, generation wait, and settle are outside this. */
+export const TUNNEL_WALK_MS_MIN = 800;
+export const TUNNEL_WALK_MS_MAX = 1400;
+
+/** Destination-tuned targets. Yellow offices sit short; poolcore sits long. */
+export const TUNNEL_WALK_MS = {
+  short: 880,
+  medium: 1120,
+  long: 1340,
+} as const;
+
+export type TunnelWalkKind = keyof typeof TUNNEL_WALK_MS;
+
+export type TunnelClockPhase = "hold" | "wait" | "walk";
+
+export type TunnelClockReport = {
+  /** Wall-clock ms of the throat walk only. */
+  walkMs: number;
+  holdMs: number;
+  waitMs: number;
+  length: TunnelWalkKind;
+  dest: string | null;
+  source: string;
+};
+
+export function tunnelWalkKind(
+  dest?: string | null,
+  requested?: TunnelWalkKind,
+): TunnelWalkKind {
+  return tunnelLengthFor(dest, requested);
+}
+
+export function tunnelWalkDurationMs(
+  dest?: string | null,
+  requested?: TunnelWalkKind,
+): number {
+  return TUNNEL_WALK_MS[tunnelWalkKind(dest, requested)];
+}
+
+/**
+ * Hold is the 0.5s jamb beat. Wait is dest-not-ready (Jev / fallback).
+ * Walk starts only after both are clear so generation lag cannot stretch it.
+ */
+export function tunnelClockPhase(holdRemain: number, destReady: boolean): TunnelClockPhase {
+  if (holdRemain > 0) return "hold";
+  if (!destReady) return "wait";
+  return "walk";
+}
+
+/** EaseInOut on normalized *time* so stride feel does not change duration. */
+export function tunnelWalkEase(u: number): number {
+  const t = Math.min(1, Math.max(0, u));
+  return t * t * (3 - 2 * t);
+}
+
+export function tunnelWalkU(elapsedMs: number, durationMs: number): number {
+  if (durationMs <= 0) return 1;
+  return Math.min(1, Math.max(0, elapsedMs / durationMs));
+}
+
+export function tunnelWalkProgress(startProgress: number, u: number, exitProgress = TUNNEL_EXIT_T): number {
+  return startProgress + (exitProgress - startProgress) * tunnelWalkEase(u);
+}
+
+export function walkMsInBand(walkMs: number): boolean {
+  return walkMs >= TUNNEL_WALK_MS_MIN && walkMs <= TUNNEL_WALK_MS_MAX;
+}

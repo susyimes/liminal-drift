@@ -55,3 +55,14 @@ export function tunnelReachedExit(
 export function tunnelWalkYaw(dir: { x: number; z: number }): number {
   return Math.atan2(-dir.x, -dir.z);
 }
+
+export function pointAlongTunnel(
+  tunnel: { entry: { x: number; z: number }; exit: { x: number; z: number } },
+  progress: number,
+): { x: number; z: number } {
+  const t = Math.min(1, Math.max(0, progress));
+  return {
+    x: tunnel.entry.x + (tunnel.exit.x - tunnel.entry.x) * t,
+    z: tunnel.entry.z + (tunnel.exit.z - tunnel.entry.z) * t,
+  };
+}
