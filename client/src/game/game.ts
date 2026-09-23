@@ -45,6 +45,7 @@ import {
   beginArmedWait,
   tunnelClockPhase,
   tunnelWaitMs,
+  waitMsForCrossing,
   tunnelWalkDurationMs,
   tunnelWalkKind,
   tunnelWalkProgress,
@@ -110,6 +111,7 @@ export class Game {
   private skipEnterHold = false;
   private pendingGenerationHoldMs = 0;
   private generationHoldUntil = 0;
+  private armedWaitTargetMs = 0;
   private tunnelHoldStartedAt = 0;
   private tunnelWaitStartedAt = 0;
   private tunnelWalkStartedAt = 0;
@@ -178,17 +180,20 @@ export class Game {
     return this.lastTunnel;
   }
 
-  /** Playtest: next throat spends `ms` in Wait (dest not ready). Clock starts at Wait, not at this call. */
+  /** Playtest: next throat Wait lasts exactly `ms` (not armed + Jev/prefetch). */
   armGenerationHold(ms: number): void {
     const hold = Math.max(0, ms);
     if (this.world.transit) {
       const armed = beginArmedWait(performance.now(), hold);
       this.generationHoldUntil = armed.holdUntil;
+      this.armedWaitTargetMs = hold;
       if (this.tunnelWaitStartedAt === 0) this.tunnelWaitStartedAt = armed.waitStartedAt;
       this.pendingGenerationHoldMs = 0;
+      this.scheduleThroatWalk();
       return;
     }
     this.pendingGenerationHoldMs = hold;
+    this.armedWaitTargetMs = hold;
     this.generationHoldUntil = 0;
   }
 
@@ -217,10 +222,15 @@ export class Game {
     this.world.currentId = room.id;
     this.placeAtDoor(room, door, -0.32);
     const compact = this.compactState();
+    const armedStep = this.pendingGenerationHoldMs > 0 || this.generationHoldUntil > performance.now();
     await this.world.considerPrefetch(this.player.x, this.player.z, compact);
-    const deadline = performance.now() + 1600;
-    while (!door.decision && !door.connectedRoomId && performance.now() < deadline) {
-      await new Promise((resolve) => window.setTimeout(resolve, 25));
+    // Armed Wait owns the delay. A prefetch loop here would add ~1s of
+    // unbooked wall-clock and/or stack onto waitMs.
+    if (!armedStep) {
+      const deadline = performance.now() + 1600;
+      while (!door.decision && !door.connectedRoomId && performance.now() < deadline) {
+        await new Promise((resolve) => window.setTimeout(resolve, 25));
+      }
     }
     this.skipEnterHold = true;
     this.placeAtDoor(room, door, 0.12);
@@ -297,6 +307,7 @@ export class Game {
     this.skipEnterHold = false;
     this.pendingGenerationHoldMs = 0;
     this.generationHoldUntil = 0;
+    this.armedWaitTargetMs = 0;
     this.resetTunnelClockRuntime();
     this.lastWalkMs = null;
     this.lastTunnel = null;
@@ -674,6 +685,7 @@ export class Game {
   /** Start the armed Wait clock at throat enter so prefetch time cannot erase waitMs. */
   private applyPendingGenerationHold(): void {
     if (this.pendingGenerationHoldMs <= 0) return;
+    this.armedWaitTargetMs = this.pendingGenerationHoldMs;
     const armed = beginArmedWait(performance.now(), this.pendingGenerationHoldMs);
     this.generationHoldUntil = armed.holdUntil;
     this.tunnelWaitStartedAt = armed.waitStartedAt;
@@ -682,10 +694,15 @@ export class Game {
 
   private destReadyForWalk(): boolean {
     if (!this.world.transit) return false;
-    if (this.generationHoldUntil > performance.now()) {
-      if (this.tunnelWaitStartedAt === 0) this.tunnelWaitStartedAt = performance.now();
-      this.world.nudgeTransitDecision(this.compactState());
-      return false;
+    if (this.generationHoldUntil > 0) {
+      if (performance.now() < this.generationHoldUntil) {
+        if (this.tunnelWaitStartedAt === 0) this.tunnelWaitStartedAt = performance.now();
+        this.world.nudgeTransitDecision(this.compactState());
+        return false;
+      }
+      // Armed Wait is over — do not add dest-not-ready / Jev time.
+      this.world.readyTransitDestination(this.compactState());
+      return true;
     }
     const ready = this.world.readyTransitDestination(this.compactState());
     if (!ready && this.tunnelWaitStartedAt === 0) this.tunnelWaitStartedAt = performance.now();
@@ -701,6 +718,12 @@ export class Game {
         return;
       }
       this.holdRemain = 0;
+      if (this.generationHoldUntil > now) {
+        if (this.tunnelWaitStartedAt === 0) this.tunnelWaitStartedAt = now;
+        this.world.nudgeTransitDecision(this.compactState());
+        this.throatReadyTimer = setTimeout(go, this.generationHoldUntil - now);
+        return;
+      }
       if (!this.destReadyForWalk()) {
         this.throatReadyTimer = setTimeout(go, 25);
         return;
@@ -781,7 +804,9 @@ export class Game {
     const holdEnd = this.tunnelWaitStartedAt || this.tunnelWalkStartedAt || performance.now();
     const holdMs =
       this.didEnterHold && this.tunnelHoldStartedAt > 0 ? Math.round(Math.max(0, holdEnd - this.tunnelHoldStartedAt)) : 0;
-    const waitMs = tunnelWaitMs(this.tunnelWaitStartedAt, this.tunnelWalkStartedAt);
+    const measuredWait = tunnelWaitMs(this.tunnelWaitStartedAt, this.tunnelWalkStartedAt);
+    const waitMs =
+      this.armedWaitTargetMs > 0 ? waitMsForCrossing({ armedMs: this.armedWaitTargetMs }) : measuredWait;
     const elapsed = Math.round(elapsedMs);
     const walkMs =
       this.tunnelWalkTargetMs > 0 ? Math.min(elapsed, this.tunnelWalkTargetMs + 32) : elapsed;
@@ -807,6 +832,8 @@ export class Game {
     this.tunnelWaitStartedAt = 0;
     this.tunnelWalkStartedAt = 0;
     this.tunnelWalkTargetMs = 0;
+    this.armedWaitTargetMs = 0;
+    this.generationHoldUntil = 0;
     this.holdUntil = 0;
     this.didEnterHold = false;
     this.landingThroat = false;

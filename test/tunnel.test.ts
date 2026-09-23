@@ -18,6 +18,7 @@ import {
 } from "../client/src/game/transit.ts";
 import {
   TUNNEL_WALK_MS,
+  armedWaitInSlop,
   beginArmedWait,
   tunnelClockPhase,
   tunnelWaitMs,
@@ -26,6 +27,7 @@ import {
   tunnelWalkKind,
   tunnelWalkProgress,
   tunnelWalkU,
+  waitMsForCrossing,
   walkMsInBand,
 } from "../client/src/game/tunnelClock.ts";
 
@@ -81,6 +83,18 @@ test("walk-only clock is 800–1400ms and ignores hold + generation wait", () =>
   const crossingMs = holdMs + waitMs + walkMs + 1350;
   assert.ok(crossingMs > 1400, "full crossing including Jev wait is not the walk");
   assert.ok(walkMsInBand(walkMs));
+});
+
+test("armed Wait is exactly the arm, not arm plus dest/Jev latency", () => {
+  assert.equal(waitMsForCrossing({ armedMs: 1800, destReadyMs: 400 }), 1800);
+  assert.equal(waitMsForCrossing({ armedMs: 1800, destReadyMs: 2500 }), 1800);
+  assert.equal(waitMsForCrossing({ armedMs: 1800, destReadyMs: 0 }), 1800);
+  assert.equal(waitMsForCrossing({ armedMs: 0, destReadyMs: 433 }), 433);
+  assert.ok(armedWaitInSlop(1800, 1800));
+  assert.ok(armedWaitInSlop(1755, 1800));
+  assert.equal(armedWaitInSlop(2004, 1800), false);
+  assert.equal(armedWaitInSlop(3263, 1800), false);
+  assert.ok(walkMsInBand(912));
 });
 
 test("armGenerationHold wait is booked from throat Wait, not from the arm() call", () => {
