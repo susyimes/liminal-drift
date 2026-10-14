@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>Liminal Drift / 阈限漂流</title>
+    <title>Liminal Drift</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -15,7 +15,11 @@
   </head>
   <body>
     <div id="app">
-      <canvas id="view"></canvas>
+      <div id="language-switch" role="group" aria-label="Language">
+        <button type="button" id="lang-en" lang="en" aria-pressed="true">English</button>
+        <button type="button" id="lang-zh" lang="zh-CN" aria-pressed="false">简体中文</button>
+      </div>
+      <canvas id="view" aria-label="Liminal Drift"></canvas>
       <div id="scanlines" aria-hidden="true"></div>
       <div id="vignette" aria-hidden="true"></div>
       <div id="grade" aria-hidden="true"></div>
@@ -27,53 +31,50 @@
 
       <section id="title-screen" class="screen">
         <div class="screen-inner">
-          <p class="eyebrow">LEVEL 0 · FLUORESCENT LIMINAL</p>
-          <h1>Liminal Drift</h1>
-          <h2>阈限漂流</h2>
-          <p class="lede">
+          <p class="eyebrow" data-i18n="eyebrow">LEVEL 0 · FLUORESCENT LIMINAL</p>
+          <h1 data-i18n="title">Liminal Drift</h1>
+          <h2 data-i18n="subtitle">The halls remember</h2>
+          <p class="lede" data-i18n="intro">
             The next room is not written down. Something in the walls chooses the layout,
             the lights, and whether you are still alone.
           </p>
-          <p class="lede zh">
-            下一间房没有剧本。墙里的东西会选定布局、灯光，以及你是否仍独自一人。
-          </p>
           <ul class="controls">
-            <li><kbd>W A S D</kbd> walk · <kbd>Shift</kbd> sneak</li>
-            <li><kbd>Mouse</kbd> look · click to lock pointer</li>
-            <li><kbd>F</kbd> flashlight · <kbd>E</kbd> pick up · <kbd>M</kbd> mute</li>
-            <li>Reach depth 14, or open a rare exit. If it catches you, the drift ends.</li>
+            <li><kbd>W A S D</kbd> <span data-i18n="walk">walk</span> · <kbd>Shift</kbd> <span data-i18n="sneak">sneak</span></li>
+            <li><kbd data-i18n="mouse">Mouse</kbd> <span data-i18n="look">look · click to lock pointer</span></li>
+            <li><kbd>F</kbd> <span data-i18n="flashlight">flashlight</span> · <kbd>E</kbd> <span data-i18n="pickup">pick up</span> · <kbd>M</kbd> <span data-i18n="muteAction">mute</span></li>
+            <li data-i18n="goal">Reach depth 14, or open a rare exit. If it catches you, the drift ends.</li>
           </ul>
           <div class="actions">
-            <button type="button" id="btn-start" class="primary">Enter the halls</button>
+            <button type="button" id="btn-start" data-i18n="start" class="primary">Enter the halls</button>
             <button type="button" id="btn-title-mute" class="ghost">Mute</button>
           </div>
-          <p id="title-health" class="fineprint">Checking Jev proxy…</p>
+          <p id="title-health" class="fineprint">Checking room generation…</p>
         </div>
       </section>
 
-      <section id="pause-hint" class="toast hidden">Click to look · Esc releases the mouse</section>
+      <section id="pause-hint" class="toast hidden" data-i18n="pauseHint">Click to look · Esc releases the mouse</section>
 
       <div id="hud" class="hidden">
         <div class="hud-top">
           <div class="frame meters">
             <div class="meter">
-              <span>神智 SANITY</span>
+              <span data-i18n="sanity">SANITY</span>
               <div class="bar"><i id="sanity-bar"></i></div>
               <b id="sanity-val">100</b>
             </div>
             <div class="meter">
-              <span>手电 LAMP</span>
+              <span data-i18n="lamp">LAMP</span>
               <div class="bar lamp"><i id="bat-bar"></i></div>
               <b id="bat-val">100</b>
             </div>
           </div>
           <div class="pills">
-            <span id="depth-pill" class="frame chip">深度 DEPTH 1</span>
-            <span id="vibe-pill" class="frame chip vibe">空置办公室 · empty_office</span>
-            <span id="key-pill" class="frame chip dim">无卡 NO CARD</span>
+            <span id="depth-pill" class="frame chip">DEPTH 1</span>
+            <span id="vibe-pill" class="frame chip vibe">Empty office</span>
+            <span id="key-pill" class="frame chip dim">NO CARD</span>
           </div>
         </div>
-        <p id="open-hint">往前走。找一扇门。</p>
+        <p id="open-hint" data-i18n="opening">Walk ahead. Find a door.</p>
         <p id="status-line">The hum does not come from the ceiling.</p>
         <div class="hud-bottom">
           <span id="jev-line" class="quiet">Jev —</span>
@@ -89,7 +90,7 @@
           <p id="over-lead" class="lede"></p>
           <pre id="over-log" class="jev-log"></pre>
           <div class="actions">
-            <button type="button" id="btn-again" class="primary">Drift again</button>
+            <button type="button" id="btn-again" data-i18n="again" class="primary">Drift again</button>
           </div>
         </div>
       </section>
@@ -98,9 +99,9 @@
         <div id="stick" class="touch-pad"><i id="stick-knob"></i></div>
         <div class="touch-look" id="look-pad"></div>
         <div class="touch-btns">
-          <button type="button" id="btn-flash">LAMP</button>
-          <button type="button" id="btn-sneak">SNEAK</button>
-          <button type="button" id="btn-use">USE</button>
+          <button type="button" id="btn-flash" data-i18n="lamp">LAMP</button>
+          <button type="button" id="btn-sneak" data-i18n="sneak">sneak</button>
+          <button type="button" id="btn-use" data-i18n="use">USE</button>
         </div>
       </div>
     </div>

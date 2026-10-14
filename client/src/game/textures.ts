@@ -1,3 +1,4 @@
+import { flavorText } from "./copy.ts";
 import * as THREE from "three";
 
 function canvas(size: number): { c: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
@@ -325,22 +326,37 @@ function coneGradient(): THREE.CanvasTexture {
   return tex;
 }
 
-export function makeGraffitiTexture(text: string): THREE.CanvasTexture {
-  const { c, ctx } = canvas(512);
+/** Redraw the existing canvas on locale changes; preserve mesh/material identity. */
+export function updateGraffitiTexture(texture: THREE.CanvasTexture, canonical: string): void {
+  const c = texture.image as HTMLCanvasElement;
+  const ctx = c.getContext("2d");
+  if (!ctx) return;
   ctx.clearRect(0, 0, 512, 512);
   ctx.fillStyle = "rgba(90, 40, 18, 0.82)";
-  ctx.font = "700 42px 'Courier New', monospace";
+  ctx.font = "700 34px 'Noto Serif SC', 'Courier New', monospace";
   ctx.save();
-  ctx.translate(40, 220);
+  ctx.translate(40, 190);
   ctx.rotate(-0.06);
-  ctx.fillText(text, 0, 0);
+  let line = "";
+  let row = 0;
+  for (const char of flavorText(canonical)) {
+    if (ctx.measureText(line + char).width > 420) {
+      ctx.fillText(line, 0, row * 46); row += 1; line = "";
+    }
+    line += char;
+  }
+  ctx.fillText(line, 0, row * 46);
   ctx.restore();
   ctx.fillStyle = "rgba(40, 20, 8, 0.25)";
-  ctx.fillRect(30, 300, 400, 8);
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.needsUpdate = true;
-  return tex;
+  ctx.fillRect(30, 370, 400, 8);
+  texture.needsUpdate = true;
+}
+export function makeGraffitiTexture(canonical: string): THREE.CanvasTexture {
+  const { c } = canvas(512);
+  const texture = new THREE.CanvasTexture(c);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  updateGraffitiTexture(texture, canonical);
+  return texture;
 }
 
 const wallMap = wallpaper([214, 194, 74], [196, 172, 52], 3);

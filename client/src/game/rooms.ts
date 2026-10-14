@@ -826,6 +826,7 @@ function decorate(
       new THREE.PlaneGeometry(2.6, 1.1),
       new THREE.MeshStandardMaterial({ map: gtex, transparent: true, roughness: 0.95, metalness: 0 }),
     );
+    plane.userData.graffitiCopy = text;
     plane.position.set(-w * 0.28, 1.55, -d / 2 + 0.12);
     group.add(plane);
   }

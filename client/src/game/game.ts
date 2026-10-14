@@ -1,3 +1,5 @@
+import { updateGraffitiTexture } from "./textures.ts";
+import { onLocaleChange, message, renderCopy, type Copy } from "../i18n.ts";
 import * as THREE from "three";
 import {
   WIN_DEPTH,
@@ -15,7 +17,7 @@ import { Player } from "./player.ts";
 import type { BuiltRoom, Door } from "./rooms.ts";
 import { doorOutward, doorWorldPos } from "./rooms.ts";
 import { World } from "./world.ts";
-import { OPENING_HINT, depthHudText, hudVibeArchetype, roomVibeHud, tunnelVibeHud } from "./copy.ts";
+import { depthHudText, hudVibeArchetype, roomVibeHud, tunnelVibeHud, roomDescription, flavorText, generationWarning } from "./copy.ts";
 import {
   ENTER_HOLD_S,
   PLACE_INSIDE_M,
@@ -92,8 +94,10 @@ export type HudSnapshot = {
 export class Game {
   mode: GameMode = "title";
   overKind: OverKind = "dead";
-  overStatus = "";
-  toast: string | null = null;
+  private overCopy: Copy = "";
+  get overStatus(): string { return renderCopy(this.overCopy); }
+  private toastCopy: Copy | null = null;
+  get toast(): string | null { return this.toastCopy === null ? null : renderCopy(this.toastCopy); }
   readonly renderer: THREE.WebGLRenderer;
   readonly scene: THREE.Scene;
   readonly camera: THREE.PerspectiveCamera;
@@ -102,7 +106,8 @@ export class Game {
   world: World;
   player: Player;
   entity: Entity;
-  status = "The hum does not come from the ceiling.";
+  private statusCopy: Copy = message("hum");
+  get status(): string { return renderCopy(this.statusCopy); }
   waitingDoor = false;
   private clock = new THREE.Clock();
   private running = false;
@@ -111,7 +116,7 @@ export class Game {
   private enterFade = 0;
   private lastEnteredRoomId: string | null = null;
   private toastAge = 0;
-  private hint: string | null = null;
+  private hint: Copy | null = null;
   private hintAge = 0;
   private hintChimed = false;
   private lastTransitId: string | null = null;
@@ -158,6 +163,15 @@ export class Game {
     this.renderer.toneMappingExposure = 0.82;
 
     this.scene = new THREE.Scene();
+    onLocaleChange(() => {
+      this.scene.traverse((object) => {
+        if (!(object instanceof THREE.Mesh) || typeof object.userData.graffitiCopy !== "string") return;
+        const material = object.material;
+        if (material instanceof THREE.MeshStandardMaterial && material.map instanceof THREE.CanvasTexture) {
+          updateGraffitiTexture(material.map, object.userData.graffitiCopy);
+        }
+      });
+    });
     this.scene.background = new THREE.Color(0x2a220e);
     this.scene.fog = new THREE.Fog(0x8a7430, 3.4, 24);
 
@@ -295,15 +309,15 @@ export class Game {
     this.player.yaw = 0;
     this.player.placeFree(this.world, 0, 1.2);
     this.mode = "playing";
-    this.status = "Yellow forever. The tubes remember a building.";
+    this.statusCopy = message("yellow");
     this.waitingDoor = false;
     this.audio.setTunnel(false);
     this.audio.setHumidity(false);
     this.fearFromJev = 0.45;
     this.enterFade = 0.28;
     this.lastEnteredRoomId = this.world.currentId;
-    this.toast = null;
-    this.hint = OPENING_HINT;
+    this.toastCopy = null;
+    this.hint = message("opening");
     this.hintAge = 5.4;
     this.hintChimed = false;
     this.lastTransitId = null;
@@ -335,7 +349,7 @@ export class Game {
       callCount: this.world.callCount,
       jevCalls: this.world.jevCalls,
       fallbackCalls: this.world.fallbackCalls,
-      warning: this.world.lastWarning,
+      warning: generationWarning(this.world.lastWarning),
       status: this.status,
       flashlightOn: this.player.flashlightOn,
       toast: this.toast,
@@ -353,7 +367,7 @@ export class Game {
             ),
           ),
       depthLabel: depthHudText(this.world.roomsVisited),
-      hint: this.hint,
+      hint: this.hint === null ? null : renderCopy(this.hint),
     };
   }
 
@@ -456,11 +470,11 @@ export class Game {
     if (portal.kind === "tunnel" && portal.tunnel && this.world.transit) {
       this.ensureInsideTunnel(portal.tunnel);
       this.hint = null;
-      this.status = this.waitingDoor
-        ? "The throat is still inventing the next room."
-        : "A connecting hall. Keep walking.";
+      this.statusCopy = this.waitingDoor
+        ? message("inventing")
+        : message("connecting");
     } else if (portal.kind === "waiting") {
-      this.status = "The doorway is still deciding what it is.";
+      this.statusCopy = message("deciding");
     } else if (portal.kind === "entered" && portal.room) {
       this.placeJustInside(portal.room);
       this.world.currentId = portal.room.id;
@@ -468,9 +482,9 @@ export class Game {
     } else if (portal.kind === "exit") {
       this.tryExit();
     } else if (portal.kind === "locked") {
-      this.status = this.player.hasKeycard ? "The lock hesitates." : "The lock wants a card.";
+      this.statusCopy = this.player.hasKeycard ? message("lockHesitates") : message("lockCard");
     } else if (portal.kind === "fake") {
-      this.status = "The hallway is wallpaper. Someone wanted you to believe in a door.";
+      this.statusCopy = message("painted");
     } else if (
       containedBefore &&
       this.lastEnteredRoomId !== containedBefore.id &&
@@ -502,18 +516,18 @@ export class Game {
         this.audio.stinger();
         this.player.punch = Math.max(this.player.punch, 0.085);
         this.hurtFlash = 1;
-        this.status = "It is in the room with you.";
+        this.statusCopy = message("presence");
       },
       onBait: () => this.audio.bait(),
       onStep: (muffled) => this.audio.entityStep(muffled),
     });
     if (caught === "caught") {
-      this.end("dead", "It closed the last few steps without a sound.");
+      this.end("dead", message("death"));
       return;
     }
 
     if (!this.instrumentedStep && this.world.roomsVisited >= WIN_DEPTH) {
-      this.end("depth", "You walked far enough that the building lost interest.");
+      this.end("depth", message("victory"));
       return;
     }
 
@@ -544,7 +558,7 @@ export class Game {
     }
     if (this.toast) {
       this.toastAge -= dt;
-      if (this.toastAge <= 0) this.toast = null;
+      if (this.toastAge <= 0) this.toastCopy = null;
     }
 
     this.particles.update(dt, this.player, this.world, this.waitingDoor);
@@ -992,29 +1006,15 @@ export class Game {
     this.audio.settleEmpty(room.surface);
     if (room.id !== "start") this.hint = null;
     if (room.decision.soundBait) this.audio.bait();
-    const bits = [room.archetype.replaceAll("_", " "), room.decision.lighting, room.decision.ambience];
-    if (room.decision.entityPresent) bits.push(room.decision.entityBehavior.replaceAll("_", " "));
-    this.status = `The room settles: ${bits.join(" · ")}.`;
-    if (room.decision.hazard !== "none") this.status += ` Hazard: ${room.decision.hazard.replaceAll("_", " ")}.`;
-    if (room.decision.deadEndBait) this.status += " Some throats are only paint.";
-    if (room.decision.advancesExit) {
-      this.status += " The air is slightly less yellow.";
-    }
-    if (room.decision.encounterCard === "power_flicker_event") this.status += " The tubes fail, then argue.";
-    if (room.decision.encounterCard === "flooded_slow_zone") this.status += " The carpet is a shallow sea.";
-    if (room.decision.encounterCard === "safe_alcove") this.status += " A recess that does not want it.";
-    if (room.decision.encounterCard === "locked_gate_needs_key") this.status += " A gate waits for red plastic.";
-    if (room.decision.clueBeat === "radio_static") this.status += " A radio found a station that is not a station.";
-    if (room.decision.clueBeat === "graffiti") this.status += " Someone wrote on the rule.";
-    if (room.archetype === "poolcore") this.status += " 池核. The tile is sweating.";
+    this.statusCopy = () => roomDescription(room.decision);
   }
 
   private tryExit(): void {
     if (this.player.hasKeycard || this.world.roomsVisited >= WIN_DEPTH - 2) {
-      this.end("exit", this.player.hasKeycard ? "The card still worked. The air on the other side was wrong in a kinder way." : "The lock had given up before you arrived.");
+      this.end("exit", this.player.hasKeycard ? message("exitCard") : message("exitOpen"));
       return;
     }
-    this.status = "A painted EXIT. The lock is real. Find a card, or go deeper.";
+    this.statusCopy = message("findCard");
   }
 
   private collect(dt: number): void {
@@ -1030,22 +1030,23 @@ export class Game {
     this.player.punch = Math.max(this.player.punch, 0.03);
     if (found.pickup.kind === "battery") {
       this.player.battery = Math.min(100, this.player.battery + 46);
-      this.flashToast("Cells. The lamp has a little more night.");
-      this.status = "Spare cells. The lamp has a little more night in it.";
+      this.flashToast(message("batteryToast"));
+      this.statusCopy = message("batteryStatus");
     } else if (found.pickup.kind === "keycard") {
       this.player.hasKeycard = true;
-      this.flashToast("A faded red card.");
-      this.status = "A faded red card. Something here still believes in doors.";
+      this.flashToast(message("cardToast"));
+      this.statusCopy = message("cardStatus");
     } else if (found.pickup.note) {
       this.player.lastNote = found.pickup.note;
       this.player.notesFound += 1;
-      this.flashToast(found.pickup.note);
-      this.status = found.pickup.note;
+      const note = found.pickup.note;
+      this.flashToast(() => flavorText(note));
+      this.statusCopy = () => flavorText(note);
     }
   }
 
-  private flashToast(text: string): void {
-    this.toast = text;
+  private flashToast(text: Copy): void {
+    this.toastCopy = text;
     this.toastAge = 3.4;
   }
 
@@ -1118,11 +1119,11 @@ export class Game {
     };
   }
 
-  private end(kind: OverKind, text: string): void {
+  private end(kind: OverKind, text: Copy): void {
     this.mode = "over";
     this.overKind = kind;
-    this.overStatus = text;
-    this.status = text;
+    this.overCopy = text;
+    this.statusCopy = text;
     this.enterFade = 0;
     this.hint = null;
     document.getElementById("door-pass")?.style.setProperty("opacity", "0");

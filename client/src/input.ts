@@ -152,6 +152,7 @@ export class Input {
   }
 
   private onKeyDown = (event: KeyboardEvent): void => {
+    if (event.target instanceof HTMLElement && event.target.closest("#language-switch, button, input, select, textarea, [contenteditable]")) return;
     const tokens = tokensForKeyEvent(event);
     for (const token of tokens) this.keys.add(token);
     if (event.key === "Shift" || event.code === "ShiftLeft" || event.code === "ShiftRight") {

@@ -63,3 +63,9 @@ Jev 使用 Choice / Score / Noul 返回房间与实体的结构化选择，不�
 ## 许可证
 
 本项目自有代码采用 [MIT 许可证](LICENSE)。第三方代码、依赖、字体及素材保留其原有条款，参见 [NOTICE.md](NOTICE.md)；代码许可证不把第三方素材重新授权为 MIT。
+
+### Language / 语言
+
+The client supports English and Simplified Chinese. It follows your browser's ordered language preferences, choosing the first supported English or Chinese entry and falling back to English. Use the **English / 简体中文** buttons on any screen to switch instantly without restarting the current run. The game remembers your choice under `liminal-drift.language` when browser storage is available. Room names, generated room descriptions, notes, graffiti, HUD and sound controls follow the selected language; generation IDs and server/API behavior stay unchanged.
+
+客户端支持英语和简体中文，并根据浏览器语言偏好顺序选择首个支持的英语或中文，没有匹配时使用英语。可随时点击右上角 **English / 简体中文** 切换；当前探索进度不会重置。浏览器允许本地存储时会记住所选语言。

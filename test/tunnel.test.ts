@@ -1,3 +1,4 @@
+import { setLocale } from "../client/src/i18n.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { tunnelVibeHud } from "../client/src/game/copy.ts";
@@ -230,7 +231,8 @@ test("tunnel tubes flicker once or twice then hold", () => {
 });
 
 test("humid teal is actually teal", () => {
+  setLocale("zh-CN");
   assert.notEqual(lightHexForMood("humid_teal", true), lightHexForMood("sick_yellow", true));
-  assert.equal(tunnelVibeHud("pool_pipe"), "池核管道 · pool_pipe");
+  assert.equal(tunnelVibeHud("pool_pipe"), "池核管道");
   assert.ok(tunnelVibeHud("yellow_throat").includes("黄喉"));
 });

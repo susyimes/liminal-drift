@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { circleHitsAabb, firstFreePoint } from "../client/src/game/math.ts";
 import {
+  Input,
   inputHeld,
   shouldClearHeldKeys,
   tokensForKeyEvent,
@@ -57,4 +58,31 @@ test("firstFreePoint walks off a blocked preferred spawn", () => {
   const blocked = (x: number, z: number) => circleHitsAabb(x, z, 0.3, wall);
   const spawn = firstFreePoint(blocked, 0, 1.2);
   assert.equal(blocked(spawn.x, spawn.z), false);
+});
+
+
+test("focused language buttons retain native activation and never queue game actions", () => {
+  const prior = Object.getOwnPropertyDescriptor(globalThis, "HTMLElement");
+  class FakeElement { closest() { return this; } }
+  Object.defineProperty(globalThis, "HTMLElement", { configurable: true, value: FakeElement });
+  try {
+    const input = new Input();
+    const handlers = input as unknown as { onKeyDown: (event: unknown) => void; onKeyUp: (event: unknown) => void };
+    let prevented = 0;
+    for (const [key, code] of [[" ", "Space"], ["w", "KeyW"], ["ArrowUp", "ArrowUp"], ["f", "KeyF"], ["e", "KeyE"], ["m", "KeyM"], ["Shift", "ShiftLeft"]]) {
+      handlers.onKeyDown({ key, code, target: new FakeElement(), repeat: false, preventDefault: () => { prevented++; } });
+    }
+    assert.equal(prevented, 0, "Space must reach the language button's native activation");
+    assert.equal(input.keys.size, 0);
+    assert.equal(input.sneakHeld, false);
+    assert.equal(input.consumeFlashlight(), false);
+    assert.equal(input.consumeInteract(), false);
+    assert.equal(input.consumeMute(), false);
+    input.keys.add("KeyW"); input.keys.add("w");
+    handlers.onKeyUp({ key: "w", code: "KeyW", target: new FakeElement() });
+    assert.equal(input.keys.size, 0, "key release still clears keys held before control focus");
+  } finally {
+    if (prior) Object.defineProperty(globalThis, "HTMLElement", prior);
+    else Reflect.deleteProperty(globalThis, "HTMLElement");
+  }
 });

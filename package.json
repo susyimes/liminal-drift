@@ -14,7 +14,7 @@
     "dev:server": "npm run dev -w server",
     "build": "npm run build -w client",
     "start": "npm run start -w server",
-    "test": "tsx --test shared/src/director.test.ts test/math.test.ts test/doors.test.ts test/input.test.ts test/feel.test.ts test/tunnel.test.ts test/director-feel.test.ts",
+    "test": "tsx --test shared/src/director.test.ts test/math.test.ts test/doors.test.ts test/input.test.ts test/feel.test.ts test/tunnel.test.ts test/director-feel.test.ts test/i18n.test.ts",
     "typecheck": "tsc -p client --noEmit && tsc -p server --noEmit"
   },
   "devDependencies": {

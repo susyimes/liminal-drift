@@ -1,3 +1,4 @@
+import { setLocale } from "../client/src/i18n.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { OPENING_HINT, depthHudText, hudVibeArchetype, roomVibeHud, roomVibeZh } from "../client/src/game/copy.ts";
@@ -12,15 +13,16 @@ import {
   tubeFlickerMul,
 } from "../client/src/game/lighting.ts";
 
-test("HUD progress names DEPTH and the room vibe in Chinese", () => {
-  assert.equal(depthHudText(1), "深度 DEPTH 1");
-  assert.equal(depthHudText(7), "深度 DEPTH 7");
+test("HUD progress and room vibe use the selected locale", () => {
+  setLocale("en");
+  assert.equal(depthHudText(1), "DEPTH 1");
+  assert.equal(depthHudText(7), "DEPTH 7");
   assert.equal(roomVibeZh("stairwell"), "楼梯间");
-  assert.equal(roomVibeHud("maze_cubicles"), "隔间迷宫 · maze_cubicles");
-  assert.equal(roomVibeHud("long_hall"), "长廊 · long_hall");
-  assert.equal(roomVibeHud("poolcore"), "池核 · poolcore");
-  assert.equal(roomVibeHud("hotel_hall"), "酒店走廊 · hotel_hall");
-  assert.equal(roomVibeHud("empty_classroom"), "空教室 · empty_classroom");
+  assert.equal(roomVibeHud("maze_cubicles"), "Cubicle maze");
+  assert.equal(roomVibeHud("long_hall"), "Long hall");
+  assert.equal(roomVibeHud("poolcore"), "Pool halls");
+  assert.equal(roomVibeHud("hotel_hall"), "Hotel hall");
+  assert.equal(roomVibeHud("empty_classroom"), "Empty classroom");
   assert.ok(OPENING_HINT.includes("门"));
 });
 
@@ -52,10 +54,11 @@ test("unexplored doors stay marked; explored doors stay open", () => {
 });
 
 test("HUD vibe prefers the room just entered over a jamb-overlap currentId", () => {
+  setLocale("en");
   assert.equal(hudVibeArchetype("maze_cubicles", "long_hall", "long_hall"), "maze_cubicles");
   assert.equal(hudVibeArchetype(null, "long_hall", "empty_office"), "long_hall");
   assert.equal(hudVibeArchetype(null, null, "empty_office"), "empty_office");
-  assert.equal(roomVibeHud("maze_cubicles"), "隔间迷宫 · maze_cubicles");
+  assert.equal(roomVibeHud("maze_cubicles"), "Cubicle maze");
   assert.notEqual(roomVibeHud("maze_cubicles"), roomVibeHud("long_hall"));
 });
 
